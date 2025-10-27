@@ -2,10 +2,15 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from setup_env import (
     CommandExecutionError,
     SetupConfig,
+    detect_compilers,
+    ensure_tool_available,
     resolve_architecture,
     run_command,
     system_info,
@@ -86,6 +91,62 @@ class ArchitectureResolutionTests(unittest.TestCase):
     def test_resolve_architecture_unknown_alias(self):
         with self.assertRaises(RuntimeError):
             resolve_architecture("mystery-arch")
+
+
+class CompilerDetectionTests(unittest.TestCase):
+    def test_detect_compilers_prefers_clang_when_available(self):
+        with mock.patch("setup_env.shutil.which") as which:
+            def fake_which(name: str):
+                mapping = {
+                    "clang": "/usr/bin/clang",
+                    "clang++": "/usr/bin/clang++",
+                }
+                return mapping.get(name)
+
+            which.side_effect = fake_which
+            result = detect_compilers(system="Linux")
+            self.assertEqual(
+                result,
+                [
+                    "-DCMAKE_C_COMPILER=/usr/bin/clang",
+                    "-DCMAKE_CXX_COMPILER=/usr/bin/clang++",
+                ],
+            )
+
+    def test_detect_compilers_falls_back_to_gcc(self):
+        with mock.patch("setup_env.shutil.which") as which:
+            def fake_which(name: str):
+                mapping = {
+                    "gcc": "/usr/bin/gcc",
+                    "g++": "/usr/bin/g++",
+                }
+                return mapping.get(name)
+
+            which.side_effect = fake_which
+            result = detect_compilers(system="Linux")
+            self.assertEqual(
+                result,
+                [
+                    "-DCMAKE_C_COMPILER=/usr/bin/gcc",
+                    "-DCMAKE_CXX_COMPILER=/usr/bin/g++",
+                ],
+            )
+
+    def test_detect_compilers_errors_when_none_found(self):
+        with mock.patch("setup_env.shutil.which", return_value=None):
+            with self.assertRaises(RuntimeError):
+                detect_compilers(system="Linux")
+
+
+class EnsureToolAvailableTests(unittest.TestCase):
+    def test_ensure_tool_available_passes_when_present(self):
+        with mock.patch("setup_env.shutil.which", return_value="/usr/bin/tool"):
+            ensure_tool_available("tool", install_hint="install tool")
+
+    def test_ensure_tool_available_errors_when_missing(self):
+        with mock.patch("setup_env.shutil.which", return_value=None):
+            with self.assertRaises(RuntimeError):
+                ensure_tool_available("tool", install_hint="install tool")
 
 
 if __name__ == "__main__":

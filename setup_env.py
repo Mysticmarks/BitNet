@@ -163,100 +163,132 @@ def run_command(
             message += f". See log at {log_path}"
         raise CommandExecutionError(message) from exc
 
+
+def detect_compilers(system: Optional[str] = None) -> list[str]:
+    """Determine the C and C++ compilers to hand off to CMake.
+
+    Parameters
+    ----------
+    system:
+        Optional override for the host operating system (used for testing).
+
+    Returns
+    -------
+    list[str]
+        The ``-D`` arguments to forward to ``cmake``.
+    """
+
+    system = system or platform.system()
+    if system == "Windows":
+        c_candidates = ["clang-cl", "clang", "cl", "gcc"]
+        cxx_candidates = ["clang-cl", "clang++", "cl", "g++"]
+    else:
+        c_candidates = ["clang", "gcc"]
+        cxx_candidates = ["clang++", "g++"]
+
+    c_compiler = None
+    for candidate in c_candidates:
+        resolved = shutil.which(candidate)
+        if resolved:
+            c_compiler = resolved
+            break
+
+    cxx_compiler = None
+    for candidate in cxx_candidates:
+        resolved = shutil.which(candidate)
+        if resolved:
+            cxx_compiler = resolved
+            break
+
+    if not c_compiler or not cxx_compiler:
+        raise RuntimeError(
+            "Unable to locate a supported compiler toolchain. "
+            "Install Clang or GCC (or clang-cl on Windows) and retry."
+        )
+
+    return [
+        f"-DCMAKE_C_COMPILER={c_compiler}",
+        f"-DCMAKE_CXX_COMPILER={cxx_compiler}",
+    ]
+
+
+def ensure_tool_available(tool: str, *, install_hint: str) -> None:
+    """Ensure the given CLI tool exists on PATH, raising a helpful error otherwise."""
+
+    if shutil.which(tool):
+        return
+    raise RuntimeError(f"Required tool '{tool}' not found on PATH. {install_hint}")
+
 def prepare_model(config: SetupConfig, command_runner=run_command):
-    _, arch = system_info()
     hf_url = config.hf_repo
-    model_dir = config.model_dir
     quant_type = config.quant_type
     quant_embd = config.quant_embd
+
+    model_root = Path(config.model_dir)
     if hf_url is not None:
-        # download the model
-        model_dir = os.path.join(model_dir, SUPPORTED_HF_MODELS[hf_url]["model_name"])
-        Path(model_dir).mkdir(parents=True, exist_ok=True)
-        logging.info(f"Downloading model {hf_url} from HuggingFace to {model_dir}...")
+        ensure_tool_available(
+            "huggingface-cli",
+            install_hint="Install it via 'pip install huggingface_hub'.",
+        )
+        model_root = model_root / SUPPORTED_HF_MODELS[hf_url]["model_name"]
+        model_root.mkdir(parents=True, exist_ok=True)
+        logging.info("Downloading model %s from HuggingFace to %s...", hf_url, model_root)
         command_runner(
-            ["huggingface-cli", "download", hf_url, "--local-dir", model_dir],
+            ["huggingface-cli", "download", hf_url, "--local-dir", str(model_root)],
             log_step="download_model",
         )
-    elif not os.path.exists(model_dir):
-        logging.error(f"Model directory {model_dir} does not exist.")
-        sys.exit(1)
+    elif not model_root.exists():
+        raise FileNotFoundError(f"Model directory {model_root} does not exist.")
     else:
-        logging.info(f"Loading model from directory {model_dir}.")
-    gguf_path = os.path.join(model_dir, "ggml-model-" + quant_type + ".gguf")
-    if not os.path.exists(gguf_path) or os.path.getsize(gguf_path) == 0:
-        logging.info(f"Converting HF model to GGUF format...")
-        if quant_type.startswith("tl"):
-            command_runner(
-                [
-                    sys.executable,
-                    "utils/convert-hf-to-gguf-bitnet.py",
-                    model_dir,
-                    "--outtype",
-                    quant_type,
-                    "--quant-embd",
-                ],
-                log_step="convert_to_tl",
-            )
-        else:  # i2s
-            # convert to f32
-            command_runner(
-                [
-                    sys.executable,
-                    "utils/convert-hf-to-gguf-bitnet.py",
-                    model_dir,
-                    "--outtype",
-                    "f32",
-                ],
-                log_step="convert_to_f32_gguf",
-            )
-            f32_model = os.path.join(model_dir, "ggml-model-f32.gguf")
-            i2s_model = os.path.join(model_dir, "ggml-model-i2_s.gguf")
-            # quantize to i2s
-            if platform.system() != "Windows":
-                if quant_embd:
-                    command_runner(
-                        [
-                            "./build/bin/llama-quantize",
-                            "--token-embedding-type",
-                            "f16",
-                            f32_model,
-                            i2s_model,
-                            "I2_S",
-                            "1",
-                            "1",
-                        ],
-                        log_step="quantize_to_i2s",
-                    )
-                else:
-                    command_runner(
-                        ["./build/bin/llama-quantize", f32_model, i2s_model, "I2_S", "1"],
-                        log_step="quantize_to_i2s",
-                    )
-            else:
-                if quant_embd:
-                    command_runner(
-                        [
-                            "./build/bin/Release/llama-quantize",
-                            "--token-embedding-type",
-                            "f16",
-                            f32_model,
-                            i2s_model,
-                            "I2_S",
-                            "1",
-                            "1",
-                        ],
-                        log_step="quantize_to_i2s",
-                    )
-                else:
-                    command_runner(
-                        ["./build/bin/Release/llama-quantize", f32_model, i2s_model, "I2_S", "1"],
-                        log_step="quantize_to_i2s",
-                    )
+        logging.info("Loading model from directory %s.", model_root)
 
-        logging.info(f"GGUF model saved at {gguf_path}")
+    gguf_path = model_root / f"ggml-model-{quant_type}.gguf"
+    if not gguf_path.exists() or gguf_path.stat().st_size == 0:
+        logging.info("Converting model to GGUF format...")
+        converter_args = [
+            sys.executable,
+            "utils/convert-hf-to-gguf-bitnet.py",
+            str(model_root),
+        ]
+
+        if quant_type.startswith("tl"):
+            converter_args.extend(["--outtype", quant_type])
+            if quant_embd:
+                converter_args.append("--quant-embd")
+            command_runner(converter_args, log_step="convert_to_tl")
+        else:
+            converter_args.extend(["--outtype", "f32"])
+            command_runner(converter_args, log_step="convert_to_f32_gguf")
+
+            f32_model = model_root / "ggml-model-f32.gguf"
+            i2s_model = model_root / "ggml-model-i2_s.gguf"
+            quantize_candidates = [
+                Path("build") / "bin" / "llama-quantize",
+                Path("build") / "bin" / "Release" / "llama-quantize",
+            ]
+            quantize_binary = next((candidate for candidate in quantize_candidates if candidate.exists()), None)
+            if quantize_binary is None:
+                raise FileNotFoundError(
+                    "llama-quantize binary not found. Run the compile step before quantization."
+                )
+
+            quantize_command = [str(quantize_binary), str(f32_model), str(i2s_model), "I2_S", "1"]
+            if quant_embd:
+                quantize_command = [
+                    str(quantize_binary),
+                    "--token-embedding-type",
+                    "f16",
+                    str(f32_model),
+                    str(i2s_model),
+                    "I2_S",
+                    "1",
+                    "1",
+                ]
+            command_runner(quantize_command, log_step="quantize_to_i2s")
+
+        logging.info("GGUF model saved at %s", gguf_path)
     else:
-        logging.info(f"GGUF model already exists at {gguf_path}")
+        logging.info("GGUF model already exists at %s", gguf_path)
 
 def setup_gguf(config: SetupConfig, command_runner=run_command):
     # Install the pip package
@@ -279,16 +311,29 @@ def gen_code(config: SetupConfig, command_runner=run_command):
 
     if arch == "arm64":
         if config.use_pretuned:
-            pretuned_kernels = os.path.join("preset_kernels", get_model_name(config))
-            if not os.path.exists(pretuned_kernels):
-                logging.error(f"Pretuned kernels not found for model {config.hf_repo}")
-                sys.exit(1)
+            pretuned_kernels = Path("preset_kernels") / get_model_name(config)
+            if not pretuned_kernels.exists():
+                raise FileNotFoundError(
+                    f"Pretuned kernels not found for model {config.hf_repo}"
+                )
             if config.quant_type == "tl1":
-                shutil.copyfile(os.path.join(pretuned_kernels, "bitnet-lut-kernels-tl1.h"), "include/bitnet-lut-kernels.h")
-                shutil.copyfile(os.path.join(pretuned_kernels, "kernel_config_tl1.ini"), "include/kernel_config.ini")
+                shutil.copyfile(
+                    pretuned_kernels / "bitnet-lut-kernels-tl1.h",
+                    "include/bitnet-lut-kernels.h",
+                )
+                shutil.copyfile(
+                    pretuned_kernels / "kernel_config_tl1.ini",
+                    "include/kernel_config.ini",
+                )
             elif config.quant_type == "tl2":
-                shutil.copyfile(os.path.join(pretuned_kernels, "bitnet-lut-kernels-tl2.h"), "include/bitnet-lut-kernels.h")
-                shutil.copyfile(os.path.join(pretuned_kernels, "kernel_config_tl2.ini"), "include/kernel_config.ini")
+                shutil.copyfile(
+                    pretuned_kernels / "bitnet-lut-kernels-tl2.h",
+                    "include/bitnet-lut-kernels.h",
+                )
+                shutil.copyfile(
+                    pretuned_kernels / "kernel_config_tl2.ini",
+                    "include/kernel_config.ini",
+                )
         model_name = get_model_name(config)
         if model_name == "bitnet_b1_58-large":
             command_runner(
@@ -355,15 +400,18 @@ def gen_code(config: SetupConfig, command_runner=run_command):
                 log_step="codegen",
             )
         else:
-            raise NotImplementedError()
+            raise ValueError(f"No code generation recipe for model '{model_name}' on arm64")
     else:
         if config.use_pretuned:
-            # cp preset_kernels/model_name/bitnet-lut-kernels_tl1.h to include/bitnet-lut-kernels.h
-            pretuned_kernels = os.path.join("preset_kernels", get_model_name(config))
-            if not os.path.exists(pretuned_kernels):
-                logging.error(f"Pretuned kernels not found for model {config.hf_repo}")
-                sys.exit(1)
-            shutil.copyfile(os.path.join(pretuned_kernels, "bitnet-lut-kernels-tl2.h"), "include/bitnet-lut-kernels.h")
+            pretuned_kernels = Path("preset_kernels") / get_model_name(config)
+            if not pretuned_kernels.exists():
+                raise FileNotFoundError(
+                    f"Pretuned kernels not found for model {config.hf_repo}"
+                )
+            shutil.copyfile(
+                pretuned_kernels / "bitnet-lut-kernels-tl2.h",
+                "include/bitnet-lut-kernels.h",
+            )
         model_name = get_model_name(config)
         if model_name == "bitnet_b1_58-large":
             command_runner(
@@ -430,32 +478,23 @@ def gen_code(config: SetupConfig, command_runner=run_command):
                 log_step="codegen",
             )
         else:
-            raise NotImplementedError()
+            raise ValueError(f"No code generation recipe for model '{model_name}' on {arch}")
 
 def compile(config: SetupConfig, command_runner=run_command):
-    # Check if cmake is installed
-    cmake_exists = subprocess.run(["cmake", "--version"], capture_output=True)
-    if cmake_exists.returncode != 0:
-        logging.error("Cmake is not available. Please install CMake and try again.")
-        sys.exit(1)
+    ensure_tool_available("cmake", install_hint="Install CMake and ensure it is on PATH.")
     _, arch = system_info()
-    if arch not in COMPILER_EXTRA_ARGS.keys():
-        logging.error(f"Arch {arch} is not supported yet")
-        sys.exit(0)
+    if arch not in COMPILER_EXTRA_ARGS:
+        raise ValueError(f"Architecture '{arch}' is not supported yet")
     logging.info("Compiling the code using CMake.")
-    command_runner(
-        [
-            "cmake",
-            "-B",
-            "build",
-            *COMPILER_EXTRA_ARGS[arch],
-            *OS_EXTRA_ARGS.get(platform.system(), []),
-            "-DCMAKE_C_COMPILER=clang",
-            "-DCMAKE_CXX_COMPILER=clang++",
-        ],
-        log_step="generate_build_files",
-    )
-    # run_command(["cmake", "--build", "build", "--target", "llama-cli", "--config", "Release"])
+    cmake_args = [
+        "cmake",
+        "-B",
+        "build",
+        *COMPILER_EXTRA_ARGS[arch],
+        *OS_EXTRA_ARGS.get(platform.system(), []),
+        *detect_compilers(),
+    ]
+    command_runner(cmake_args, log_step="generate_build_files")
     command_runner(["cmake", "--build", "build", "--config", "Release"], log_step="compile")
 
 
@@ -517,6 +556,6 @@ if __name__ == "__main__":
         _, arch = system_info()
         validate_configuration(config, arch)
         main(config)
-    except (CommandExecutionError, ValueError, RuntimeError) as exc:
+    except (CommandExecutionError, ValueError, RuntimeError, FileNotFoundError) as exc:
         logging.error(str(exc))
         sys.exit(1)
