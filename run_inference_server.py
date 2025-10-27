@@ -1,64 +1,107 @@
-import os
-import sys
-import signal
-import platform
+"""HTTP server launcher for BitNet using llama.cpp."""
+
+from __future__ import annotations
+
 import argparse
-import subprocess
+import logging
+import signal
+import sys
+from pathlib import Path
+from typing import Optional
 
-def run_command(command, shell=False):
-    """Run a system command and ensure it succeeds."""
+from bitnet import BitNetRuntime, RuntimeConfigurationError, RuntimeLaunchError
+
+
+def _parse_threads(value: str) -> Optional[int]:
+    if value.lower() == "auto":
+        return None
     try:
-        subprocess.run(command, shell=shell, check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"Error occurred while running command: {e}")
-        sys.exit(1)
+        return int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("Thread count must be 'auto' or an integer") from exc
 
-def run_server():
-    build_dir = "build"
-    if platform.system() == "Windows":
-        server_path = os.path.join(build_dir, "bin", "Release", "llama-server.exe")
-        if not os.path.exists(server_path):
-            server_path = os.path.join(build_dir, "bin", "llama-server")
-    else:
-        server_path = os.path.join(build_dir, "bin", "llama-server")
-    
-    command = [
-        f'{server_path}',
-        '-m', args.model,
-        '-c', str(args.ctx_size),
-        '-t', str(args.threads),
-        '-n', str(args.n_predict),
-        '-ngl', '0',
-        '--temp', str(args.temperature),
-        '--host', args.host,
-        '--port', str(args.port),
-        '-cb'  # Enable continuous batching
-    ]
-    
-    if args.prompt:
-        command.extend(['-p', args.prompt])
-    
-    # Note: -cnv flag is removed as it's not supported by the server
-    
-    print(f"Starting server on {args.host}:{args.port}")
-    run_command(command)
 
-def signal_handler(sig, frame):
-    print("Ctrl+C pressed, shutting down server...")
-    sys.exit(0)
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Launch the llama.cpp server with BitNet ergonomics")
+    parser.add_argument("-m", "--model", type=Path, required=True, help="Path to the GGUF model")
+    parser.add_argument("-n", "--n-predict", type=int, default=4096, help="Maximum tokens to sample")
+    parser.add_argument("-c", "--ctx-size", type=int, default=2048, help="Context window size")
+    parser.add_argument("-t", "--threads", type=_parse_threads, default=None, help="Thread count or 'auto'")
+    parser.add_argument("--temperature", type=float, default=0.8, help="Sampling temperature")
+    parser.add_argument("--host", type=str, default="127.0.0.1", help="Bind address")
+    parser.add_argument("--port", type=int, default=8080, help="Port to listen on")
+    parser.add_argument("-p", "--prompt", type=str, help="Optional system prompt")
+    parser.add_argument("-b", "--batch-size", type=int, default=1, help="Prompt batch size")
+    parser.add_argument(
+        "--build-dir",
+        type=Path,
+        default=Path("build"),
+        help="Directory that contains the compiled llama.cpp binaries",
+    )
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        help="Logging verbosity for runtime diagnostics",
+        choices=["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"],
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the command that would be executed without running it",
+    )
+    parser.add_argument(
+        "--diagnostics",
+        action="store_true",
+        help="Show a health report for the runtime and exit",
+    )
+    parser.add_argument(
+        "--extra-args",
+        nargs=argparse.REMAINDER,
+        help="Additional llama.cpp flags appended verbatim",
+    )
+    return parser
 
-if __name__ == "__main__":
-    signal.signal(signal.SIGINT, signal_handler)
-    
-    parser = argparse.ArgumentParser(description='Run llama.cpp server')
-    parser.add_argument("-m", "--model", type=str, help="Path to model file", required=False, default="models/bitnet_b1_58-3B/ggml-model-i2_s.gguf")
-    parser.add_argument("-p", "--prompt", type=str, help="System prompt for the model", required=False)
-    parser.add_argument("-n", "--n-predict", type=int, help="Number of tokens to predict", required=False, default=4096)
-    parser.add_argument("-t", "--threads", type=int, help="Number of threads to use", required=False, default=2)
-    parser.add_argument("-c", "--ctx-size", type=int, help="Size of the context window", required=False, default=2048)
-    parser.add_argument("--temperature", type=float, help="Temperature for sampling", required=False, default=0.8)
-    parser.add_argument("--host", type=str, help="IP address to listen on", required=False, default="127.0.0.1")
-    parser.add_argument("--port", type=int, help="Port to listen on", required=False, default=8080)
-    
-    args = parser.parse_args()
-    run_server()
+
+def main(argv: Optional[list[str]] = None) -> int:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+
+    runtime = BitNetRuntime(build_dir=args.build_dir, log_level=getattr(logging, args.log_level))
+
+    if args.diagnostics:
+        report = runtime.diagnostics(model=args.model)
+        print("Runtime diagnostics:")
+        for key, value in report.as_dict().items():
+            print(f"  {key}: {value}")
+        return 0
+
+    try:
+        result = runtime.run_server(
+            model=args.model,
+            host=args.host,
+            port=args.port,
+            prompt=args.prompt,
+            n_predict=args.n_predict,
+            ctx_size=args.ctx_size,
+            temperature=args.temperature,
+            threads=args.threads,
+            batch_size=args.batch_size,
+            dry_run=args.dry_run,
+            extra_args=args.extra_args,
+        )
+    except RuntimeConfigurationError as exc:
+        parser.error(str(exc))
+    except RuntimeLaunchError as exc:
+        print(f"Runtime exited with an error: {exc}", file=sys.stderr)
+        return 1
+
+    if args.dry_run and isinstance(result, list):
+        print("Dry run command:")
+        print(" ".join(result))
+        return 0
+    return int(result)
+
+
+if __name__ == "__main__":  # pragma: no cover
+    signal.signal(signal.SIGINT, lambda sig, frame: sys.exit(0))
+    sys.exit(main())

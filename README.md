@@ -220,30 +220,48 @@ optional arguments:
 ### Basic usage
 ```bash
 # Run inference with the quantized model
-python run_inference.py -m models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf -p "You are a helpful assistant" -cnv
+python run_inference.py \
+  --model models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf \
+  --prompt "You are a helpful assistant" \
+  --threads auto \
+  --conversation
 ```
 <pre>
-usage: run_inference.py [-h] [-m MODEL] [-n N_PREDICT] -p PROMPT [-t THREADS] [-c CTX_SIZE] [-temp TEMPERATURE] [-cnv]
+usage: run_inference.py [-h] -m MODEL -p PROMPT [-n N_PREDICT] [-c CTX_SIZE] [-t THREADS]
+                        [--temperature TEMPERATURE] [-b BATCH_SIZE] [-cnv] [--build-dir BUILD_DIR]
+                        [--log-level {CRITICAL,ERROR,WARNING,INFO,DEBUG}] [--dry-run] [--diagnostics]
+                        [--extra-args ...]
 
-Run inference
+Run BitNet inference via llama.cpp
 
-optional arguments:
+options:
   -h, --help            show this help message and exit
   -m MODEL, --model MODEL
-                        Path to model file
-  -n N_PREDICT, --n-predict N_PREDICT
-                        Number of tokens to predict when generating text
+                        Path to the GGUF model
   -p PROMPT, --prompt PROMPT
                         Prompt to generate text from
-  -t THREADS, --threads THREADS
-                        Number of threads to use
+  -n N_PREDICT, --n-predict N_PREDICT
+                        Number of tokens to generate
   -c CTX_SIZE, --ctx-size CTX_SIZE
-                        Size of the prompt context
-  -temp TEMPERATURE, --temperature TEMPERATURE
-                        Temperature, a hyperparameter that controls the randomness of the generated text
-  -cnv, --conversation  Whether to enable chat mode or not (for instruct models.)
-                        (When this option is turned on, the prompt specified by -p will be used as the system prompt.)
+                        Context window size
+  -t THREADS, --threads THREADS
+                        Thread count or 'auto'
+  --temperature TEMPERATURE
+                        Sampling temperature
+  -b BATCH_SIZE, --batch-size BATCH_SIZE
+                        Prompt batch size
+  -cnv, --conversation  Enable chat mode
+  --build-dir BUILD_DIR
+                        Directory that contains the compiled llama.cpp binaries
+  --log-level {CRITICAL,ERROR,WARNING,INFO,DEBUG}
+                        Logging verbosity for runtime diagnostics
+  --dry-run             Print the command that would be executed without running it
+  --diagnostics         Show a health report for the runtime and exit
+  --extra-args ...      Additional llama.cpp flags appended verbatim
 </pre>
+
+See [`docs/deployment.md`](docs/deployment.md) for a step-by-step checklist that
+turns these scripts into a repeatable deployment pipeline.
 
 ### Benchmark
 We provide scripts to run the inference benchmark providing a model.
