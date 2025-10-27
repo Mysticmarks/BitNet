@@ -1,56 +1,112 @@
-import os
-import sys
-import signal
-import platform
+"""High-level CLI for launching BitNet inference runs.
+
+The original implementation simply proxied to llama.cpp.  This version layers
+runtime validation, diagnostics, and ergonomic defaults (such as automatic
+thread detection) on top of the compiled binaries while remaining entirely
+backwards compatible with the llama.cpp flags for advanced users.
+"""
+
+from __future__ import annotations
+
 import argparse
-import subprocess
+import logging
+import signal
+import sys
+from pathlib import Path
+from typing import Optional
 
-def run_command(command, shell=False):
-    """Run a system command and ensure it succeeds."""
+from bitnet import BitNetRuntime, RuntimeConfigurationError, RuntimeLaunchError
+
+
+def _parse_threads(value: str) -> Optional[int]:
+    if value.lower() == "auto":
+        return None
     try:
-        subprocess.run(command, shell=shell, check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"Error occurred while running command: {e}")
-        sys.exit(1)
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("Thread count must be 'auto' or an integer") from exc
+    return parsed
 
-def run_inference():
-    build_dir = "build"
-    if platform.system() == "Windows":
-        main_path = os.path.join(build_dir, "bin", "Release", "llama-cli.exe")
-        if not os.path.exists(main_path):
-            main_path = os.path.join(build_dir, "bin", "llama-cli")
-    else:
-        main_path = os.path.join(build_dir, "bin", "llama-cli")
-    command = [
-        f'{main_path}',
-        '-m', args.model,
-        '-n', str(args.n_predict),
-        '-t', str(args.threads),
-        '-p', args.prompt,
-        '-ngl', '0',
-        '-c', str(args.ctx_size),
-        '--temp', str(args.temperature),
-        "-b", "1",
-    ]
-    if args.conversation:
-        command.append("-cnv")
-    run_command(command)
 
-def signal_handler(sig, frame):
-    print("Ctrl+C pressed, exiting...")
-    sys.exit(0)
-
-if __name__ == "__main__":
-    signal.signal(signal.SIGINT, signal_handler)
-    # Usage: python run_inference.py -p "Microsoft Corporation is an American multinational corporation and technology company headquartered in Redmond, Washington."
-    parser = argparse.ArgumentParser(description='Run inference')
-    parser.add_argument("-m", "--model", type=str, help="Path to model file", required=False, default="models/bitnet_b1_58-3B/ggml-model-i2_s.gguf")
-    parser.add_argument("-n", "--n-predict", type=int, help="Number of tokens to predict when generating text", required=False, default=128)
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run BitNet inference via llama.cpp")
+    parser.add_argument("-m", "--model", type=Path, help="Path to the GGUF model", required=True)
     parser.add_argument("-p", "--prompt", type=str, help="Prompt to generate text from", required=True)
-    parser.add_argument("-t", "--threads", type=int, help="Number of threads to use", required=False, default=2)
-    parser.add_argument("-c", "--ctx-size", type=int, help="Size of the prompt context", required=False, default=2048)
-    parser.add_argument("-temp", "--temperature", type=float, help="Temperature, a hyperparameter that controls the randomness of the generated text", required=False, default=0.8)
-    parser.add_argument("-cnv", "--conversation", action='store_true', help="Whether to enable chat mode or not (for instruct models.)")
+    parser.add_argument("-n", "--n-predict", type=int, default=128, help="Number of tokens to generate")
+    parser.add_argument("-c", "--ctx-size", type=int, default=2048, help="Context window size")
+    parser.add_argument("-t", "--threads", type=_parse_threads, default=None, help="Thread count or 'auto'")
+    parser.add_argument("--temperature", type=float, default=0.8, help="Sampling temperature")
+    parser.add_argument("-b", "--batch-size", type=int, default=1, help="Prompt batch size")
+    parser.add_argument("-cnv", "--conversation", action="store_true", help="Enable chat mode")
+    parser.add_argument(
+        "--build-dir",
+        type=Path,
+        default=Path("build"),
+        help="Directory that contains the compiled llama.cpp binaries",
+    )
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        help="Logging verbosity for runtime diagnostics",
+        choices=["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"],
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the command that would be executed without running it",
+    )
+    parser.add_argument(
+        "--diagnostics",
+        action="store_true",
+        help="Show a health report for the runtime and exit",
+    )
+    parser.add_argument(
+        "--extra-args",
+        nargs=argparse.REMAINDER,
+        help="Additional llama.cpp flags appended verbatim",
+    )
+    return parser
 
-    args = parser.parse_args()
-    run_inference()
+
+def main(argv: Optional[list[str]] = None) -> int:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+
+    runtime = BitNetRuntime(build_dir=args.build_dir, log_level=getattr(logging, args.log_level))
+
+    if args.diagnostics:
+        report = runtime.diagnostics(model=args.model)
+        print("Runtime diagnostics:")
+        for key, value in report.as_dict().items():
+            print(f"  {key}: {value}")
+        return 0
+
+    try:
+        result = runtime.run_inference(
+            model=args.model,
+            prompt=args.prompt,
+            n_predict=args.n_predict,
+            ctx_size=args.ctx_size,
+            temperature=args.temperature,
+            threads=args.threads,
+            batch_size=args.batch_size,
+            conversation=args.conversation,
+            dry_run=args.dry_run,
+            extra_args=args.extra_args,
+        )
+    except RuntimeConfigurationError as exc:
+        parser.error(str(exc))
+    except RuntimeLaunchError as exc:
+        print(f"Runtime exited with an error: {exc}", file=sys.stderr)
+        return 1
+
+    if args.dry_run and isinstance(result, list):
+        print("Dry run command:")
+        print(" ".join(result))
+        return 0
+    return int(result)
+
+
+if __name__ == "__main__":  # pragma: no cover - exercised in tests via main()
+    signal.signal(signal.SIGINT, lambda sig, frame: sys.exit(0))
+    sys.exit(main())
