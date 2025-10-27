@@ -303,7 +303,18 @@ huggingface-cli download microsoft/bitnet-b1.58-2B-4T-bf16 --local-dir ./models/
 python ./utils/convert-helper-bitnet.py ./models/bitnet-b1.58-2B-4T-bf16
 ```
 
-### FAQ (Frequently Asked Questions)📌 
+### Running unit tests
+
+The repository now includes lightweight sanity checks for the Python setup workflow. Execute them with:
+
+```
+python -m unittest discover -s tests
+```
+
+The tests are safe to run without downloading models or compiling native code; they validate the command runner and configuration
+guards used by `setup_env.py`.
+
+### FAQ (Frequently Asked Questions)📌
 
 #### Q1: The build dies with errors building llama.cpp due to issues with std::chrono in log.cpp?
 
