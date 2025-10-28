@@ -37,6 +37,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-t", "--threads", type=_parse_threads, default=None, help="Thread count or 'auto'")
     parser.add_argument("--temperature", type=float, default=0.8, help="Sampling temperature")
     parser.add_argument("-b", "--batch-size", type=int, default=1, help="Prompt batch size")
+    parser.add_argument(
+        "--gpu-layers",
+        type=int,
+        default=0,
+        help="Number of layers to offload to the GPU (requires GPU build)",
+    )
     parser.add_argument("-cnv", "--conversation", action="store_true", help="Enable chat mode")
     parser.add_argument(
         "--build-dir",
@@ -90,6 +96,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             temperature=args.temperature,
             threads=args.threads,
             batch_size=args.batch_size,
+            gpu_layers=args.gpu_layers,
             conversation=args.conversation,
             dry_run=args.dry_run,
             extra_args=args.extra_args,

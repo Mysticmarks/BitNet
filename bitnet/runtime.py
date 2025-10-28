@@ -88,6 +88,7 @@ class BitNetRuntime:
         temperature: float = 0.8,
         threads: Optional[int] = None,
         batch_size: int = 1,
+        gpu_layers: Optional[int] = 0,
         conversation: bool = False,
         dry_run: bool = False,
         extra_args: Optional[Sequence[str]] = None,
@@ -102,6 +103,7 @@ class BitNetRuntime:
             temperature=temperature,
             threads=threads,
             batch_size=batch_size,
+            gpu_layers=gpu_layers,
             conversation=conversation,
             extra_args=extra_args,
         )
@@ -121,6 +123,7 @@ class BitNetRuntime:
         temperature: float = 0.8,
         threads: Optional[int] = None,
         batch_size: int = 1,
+        gpu_layers: Optional[int] = 0,
         dry_run: bool = False,
         extra_args: Optional[Sequence[str]] = None,
     ) -> Sequence[str] | int:
@@ -136,6 +139,7 @@ class BitNetRuntime:
             temperature=temperature,
             threads=threads,
             batch_size=batch_size,
+            gpu_layers=gpu_layers,
             extra_args=extra_args,
         )
         if dry_run:
@@ -189,6 +193,7 @@ class BitNetRuntime:
         temperature: float,
         threads: Optional[int],
         batch_size: int,
+        gpu_layers: Optional[int],
         conversation: bool,
         extra_args: Optional[Sequence[str]],
     ) -> List[str]:
@@ -196,6 +201,7 @@ class BitNetRuntime:
         self._ensure_positive(ctx_size, "ctx_size")
         self._ensure_positive(batch_size, "batch_size")
         self._ensure_temperature(temperature)
+        gpu_layers = self._resolve_gpu_layers(gpu_layers)
         prompt = prompt.strip()
         if not prompt:
             raise RuntimeConfigurationError("Prompt must not be empty.")
@@ -214,8 +220,6 @@ class BitNetRuntime:
             str(thread_count),
             "-p",
             prompt,
-            "-ngl",
-            "0",
             "-c",
             str(ctx_size),
             "--temp",
@@ -223,6 +227,8 @@ class BitNetRuntime:
             "-b",
             str(batch_size),
         ]
+        if gpu_layers is not None:
+            command.extend(["-ngl", str(gpu_layers)])
         if conversation:
             command.append("-cnv")
         if extra_args:
@@ -241,6 +247,7 @@ class BitNetRuntime:
         temperature: float,
         threads: Optional[int],
         batch_size: int,
+        gpu_layers: Optional[int],
         extra_args: Optional[Sequence[str]],
     ) -> List[str]:
         self._ensure_positive(n_predict, "n_predict")
@@ -248,6 +255,7 @@ class BitNetRuntime:
         self._ensure_positive(batch_size, "batch_size")
         self._ensure_temperature(temperature)
         self._ensure_port(port)
+        gpu_layers = self._resolve_gpu_layers(gpu_layers)
 
         binary = self._require_binary("llama-server")
         model_path = self._require_model(model)
@@ -263,8 +271,6 @@ class BitNetRuntime:
             str(thread_count),
             "-n",
             str(n_predict),
-            "-ngl",
-            "0",
             "--temp",
             f"{temperature}",
             "--host",
@@ -275,6 +281,8 @@ class BitNetRuntime:
             "-b",
             str(batch_size),
         ]
+        if gpu_layers is not None:
+            command.extend(["-ngl", str(gpu_layers)])
         if prompt:
             command.extend(["-p", prompt])
         if extra_args:
@@ -338,6 +346,13 @@ class BitNetRuntime:
         if not path.is_file():
             raise RuntimeConfigurationError(f"Model path must be a file: {path}")
         return path
+
+    def _resolve_gpu_layers(self, value: Optional[int]) -> Optional[int]:
+        if value is None:
+            return None
+        if value < 0:
+            raise RuntimeConfigurationError("gpu_layers must be zero or a positive integer.")
+        return value
 
     def _ensure_positive(self, value: int, field: str) -> None:
         if value <= 0:
