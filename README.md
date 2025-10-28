@@ -228,7 +228,8 @@ python run_inference.py \
 ```
 <pre>
 usage: run_inference.py [-h] -m MODEL -p PROMPT [-n N_PREDICT] [-c CTX_SIZE] [-t THREADS]
-                        [--temperature TEMPERATURE] [-b BATCH_SIZE] [-cnv] [--build-dir BUILD_DIR]
+                        [--temperature TEMPERATURE] [-b BATCH_SIZE] [--gpu-layers GPU_LAYERS]
+                        [-cnv] [--build-dir BUILD_DIR]
                         [--log-level {CRITICAL,ERROR,WARNING,INFO,DEBUG}] [--dry-run] [--diagnostics]
                         [--extra-args ...]
 
@@ -250,6 +251,9 @@ options:
                         Sampling temperature
   -b BATCH_SIZE, --batch-size BATCH_SIZE
                         Prompt batch size
+  --gpu-layers GPU_LAYERS
+                        Number of layers to offload to the GPU (requires GPU
+                        build)
   -cnv, --conversation  Enable chat mode
   --build-dir BUILD_DIR
                         Directory that contains the compiled llama.cpp binaries
@@ -262,6 +266,10 @@ options:
 
 See [`docs/deployment.md`](docs/deployment.md) for a step-by-step checklist that
 turns these scripts into a repeatable deployment pipeline.
+
+When running against a GPU-enabled build of llama.cpp, specify
+`--gpu-layers <count>` to offload the chosen number of transformer layers while
+retaining the validated runtime checks provided by the Python wrapper.
 
 ### Benchmark
 We provide scripts to run the inference benchmark providing a model.

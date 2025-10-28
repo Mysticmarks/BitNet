@@ -33,6 +33,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-p", "--prompt", type=str, help="Optional system prompt")
     parser.add_argument("-b", "--batch-size", type=int, default=1, help="Prompt batch size")
     parser.add_argument(
+        "--gpu-layers",
+        type=int,
+        default=0,
+        help="Number of layers to offload to the GPU (requires GPU build)",
+    )
+    parser.add_argument(
         "--build-dir",
         type=Path,
         default=Path("build"),
@@ -86,6 +92,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             temperature=args.temperature,
             threads=args.threads,
             batch_size=args.batch_size,
+            gpu_layers=args.gpu_layers,
             dry_run=args.dry_run,
             extra_args=args.extra_args,
         )

@@ -37,6 +37,7 @@ class BitNetRuntimeTests(unittest.TestCase):
             temperature=0.5,
             threads=2,
             batch_size=2,
+            gpu_layers=4,
             conversation=True,
             dry_run=True,
             extra_args=["--top-k", "20"],
@@ -45,6 +46,8 @@ class BitNetRuntimeTests(unittest.TestCase):
         self.assertEqual(command[0], str(self.build_dir / "bin" / "llama-cli"))
         self.assertIn("--top-k", command)
         self.assertIn("20", command)
+        ngl_index = command.index("-ngl")
+        self.assertEqual(command[ngl_index + 1], "4")
 
     def test_run_server_clamps_thread_count_to_cpu(self):
         with mock.patch("os.cpu_count", return_value=4):
@@ -55,10 +58,13 @@ class BitNetRuntimeTests(unittest.TestCase):
             port=8000,
             prompt="System",
             threads=16,
+            gpu_layers=2,
             dry_run=True,
         )
         t_index = command.index("-t")
         self.assertEqual(command[t_index + 1], "4")
+        ngl_index = command.index("-ngl")
+        self.assertEqual(command[ngl_index + 1], "2")
 
     def test_missing_prompt_raises_configuration_error(self):
         runtime = BitNetRuntime(build_dir=self.build_dir)
@@ -66,6 +72,16 @@ class BitNetRuntimeTests(unittest.TestCase):
             runtime.run_inference(
                 model=self.model_path,
                 prompt="   ",
+                dry_run=True,
+            )
+
+    def test_negative_gpu_layers_raises(self):
+        runtime = BitNetRuntime(build_dir=self.build_dir)
+        with self.assertRaises(RuntimeConfigurationError):
+            runtime.run_inference(
+                model=self.model_path,
+                prompt="Hello",
+                gpu_layers=-1,
                 dry_run=True,
             )
 
