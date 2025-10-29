@@ -10,6 +10,12 @@ bitnet.cpp is the official inference framework for 1-bit LLMs (e.g., BitNet b1.5
 
 The first release of bitnet.cpp is to support inference on CPUs. bitnet.cpp achieves speedups of **1.37x** to **5.07x** on ARM CPUs, with larger models experiencing greater performance gains. Additionally, it reduces energy consumption by **55.4%** to **70.0%**, further boosting overall efficiency. On x86 CPUs, speedups range from **2.37x** to **6.17x** with energy reductions between **71.9%** to **82.2%**. Furthermore, bitnet.cpp can run a 100B BitNet b1.58 model on a single CPU, achieving speeds comparable to human reading (5-7 tokens per second), significantly enhancing the potential for running LLMs on local devices. Please refer to the [technical report](https://arxiv.org/abs/2410.16144) for more details.
 
+## Documentation Map
+- **System Requirements Document (SRD):** [docs/system-requirements.md](docs/system-requirements.md) captures the authoritative scope, architecture, and quality targets for the full stack.
+- **System Roadmap & Scope Register:** [docs/system-roadmap.md](docs/system-roadmap.md) tracks capability maturity, owners, and milestone planning across all phases of the autonomous development loop.
+- **Iteration Log:** [docs/iteration-log.md](docs/iteration-log.md) records autonomous refinement cycles and links to future actions for Phases 4–12.
+- **Runtime Supervisor Guide:** [docs/runtime_supervisor.md](docs/runtime_supervisor.md) explains asynchronous orchestration patterns and telemetry hooks.
+
 <img src="./assets/m2_performance.jpg" alt="m2_performance" width="800"/>
 <img src="./assets/intel_performance.jpg" alt="m2_performance" width="800"/>
 
