@@ -1,6 +1,6 @@
 # System Requirements Document (SRD)
 
-_Last updated: 2025-05-23_
+_Last updated: 2025-05-28_
 
 ## 1. Mission Statement
 bitnet.cpp delivers high-performance inference for 1-bit and ternary LLMs on CPU and GPU targets. The system provides command-line tooling, runtime orchestration, and kernel implementations that make it possible to execute BitNet models efficiently on commodity hardware while remaining backwards compatible with llama.cpp workflows.
@@ -27,6 +27,8 @@ The system interacts with the following artefacts:
 - **Model files** in GGUF format (converted via `utils/convert-helper-bitnet.py`).
 - **Compiled binaries** such as `llama-cli` and `llama-server`.
 - **Configuration scripts** (`setup_env.py`, `utils/e2e_benchmark.py`).
+- **Container artefacts** generated from `infra/docker/*.Dockerfile` and IaC
+  modules under `infra/terraform/`.
 
 ## 4. Functional Requirements
 ### 4.1 Inference Execution
@@ -44,7 +46,10 @@ The system interacts with the following artefacts:
 ### 4.4 Tooling & Utilities
 - Conversion of `.safetensors` checkpoints to GGUF via `utils/convert-helper-bitnet.py`.
 - Benchmark generation with dummy model creation (`utils/generate-dummy-bitnet-model.py`) and execution (`utils/e2e_benchmark.py`).
-- Environment bootstrapping for CPU/GPU builds using `setup_env.py`.
+- Environment bootstrapping for CPU/GPU builds using `setup_env.py`, which is
+  now idempotent, cache-aware, and cross-platform.
+- Container image definitions (`infra/docker/`) and Terraform modules
+  (`infra/terraform/`) that implement turnkey deployment paths.
 
 ### 4.5 Testing & Quality Gates
 - Python unit tests validate CLI argument parsing, runtime configuration guards, and command assembly (`tests`).
@@ -81,6 +86,10 @@ The system interacts with the following artefacts:
 - **Local CPU**: Build via `setup_env.py --cpu` or manual CMake invocation; run CLI with GGUF model.
 - **Local GPU**: Follow `gpu/README.md` instructions to compile CUDA/ROCm kernels and run CLI with `--gpu-layers`.
 - **Service Integration**: Embed `BitNetRuntime` in orchestration services, using diagnostics and dry-run for health checks.
+- **Container & Kubernetes**: Build from the published Dockerfiles and deploy via
+  the Terraform module for managed clusters.
+- **Edge Devices**: Use `setup_env.py` with caching enabled to provision native
+  binaries and GGUF artefacts without container runtimes.
 
 ## 7. Module Interfaces
 - `BitNetRuntime.run_inference(...) -> Sequence[str] | int`: constructs or executes command.

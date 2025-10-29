@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bitnet-runtime"
+version = "0.1.0"
+description = "Runtime orchestration helpers and bootstrap utilities for BitNet inference"
+readme = "README.md"
+authors = [{name = "BitNet Maintainers", email = "bitnet@example.com"}]
+license = {text = "MIT"}
+requires-python = ">=3.9"
+keywords = ["bitnet", "llm", "inference", "runtime"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/microsoft/BitNet"
+Documentation = "https://github.com/microsoft/BitNet/tree/main/docs"
+Source = "https://github.com/microsoft/BitNet"
+Issues = "https://github.com/microsoft/BitNet/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["bitnet*"]
+
+[tool.setuptools.package-data]
+bitnet = ["py.typed"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+exclude = ["3rdparty", "utils"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "RUF"]
+
+[tool.coverage.run]
+omit = ["tests/*"]
