@@ -271,6 +271,15 @@ When running against a GPU-enabled build of llama.cpp, specify
 `--gpu-layers <count>` to offload the chosen number of transformer layers while
 retaining the validated runtime checks provided by the Python wrapper.
 
+### Asynchronous orchestration
+
+For services that need to schedule multiple inference jobs concurrently or
+enforce latency budgets, the new `RuntimeSupervisor` pairs with
+`BitNetRuntime` to provide asyncio-based execution with configurable
+concurrency and timeouts.  See [`docs/runtime_supervisor.md`](docs/runtime_supervisor.md)
+for integration examples and guidance on capturing structured telemetry from
+each run.
+
 ### Benchmark
 We provide scripts to run the inference benchmark providing a model.
 

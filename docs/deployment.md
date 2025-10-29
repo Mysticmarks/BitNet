@@ -33,6 +33,9 @@ Both `run_inference.py` and `run_inference_server.py` now use the shared
   easy to integrate with supervisors such as `systemd` or Kubernetes Jobs.
 - Structured diagnostics that can be exported to JSON if you need to plug the
   scripts into monitoring dashboards.
+- An asyncio-based `RuntimeSupervisor` that can enforce concurrency limits and
+  kill runaway processes when paired with API gateways or job queues.  See
+  [`runtime_supervisor.md`](runtime_supervisor.md) for orchestration patterns.
 
 ## 3. Server hardening checklist
 
@@ -53,14 +56,16 @@ Before exposing the llama.cpp server to real users:
 The `tests/test_runtime.py` module exercises the runtime helper directly.  The
 suite creates ephemeral binaries and models to validate command construction,
 thread clamping logic, diagnostics, and the error paths triggered when
-pre-requisites are missing.  Extend these tests with integration checks that
-spawn actual llama.cpp processes when you have the binaries and GGUF artefacts
-available in CI.
+pre-requisites are missing.  `tests/test_supervisor.py` adds asyncio-driven
+coverage for concurrency guarantees and timeout enforcement so you can wire the
+supervisor into production control planes with confidence.  Extend these tests
+with integration checks that spawn actual llama.cpp processes when you have the
+binaries and GGUF artefacts available in CI.
 
 ## 5. Future extensions
 
-- Add watchdog processes that monitor token throughput and restart the binary
-  on stalls.
 - Emit JSON diagnostics via structured logging for richer dashboards.
 - Introduce GPU-aware runtime helpers that detect the available accelerators and
   pick the optimal binary automatically.
+- Provide container images or IaC templates that package the runtime and
+  supervisor for fleet deployment.
