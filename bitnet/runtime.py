@@ -15,14 +15,18 @@ import logging
 import os
 import platform
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence
 
 __all__ = [
     "BitNetRuntime",
     "RuntimeConfigurationError",
+    "RuntimeDiagnostics",
     "RuntimeLaunchError",
+    "RuntimeTimeoutError",
 ]
 
 
@@ -32,6 +36,10 @@ class RuntimeConfigurationError(ValueError):
 
 class RuntimeLaunchError(RuntimeError):
     """Raised when a runtime process exits unsuccessfully."""
+
+
+class RuntimeTimeoutError(RuntimeLaunchError):
+    """Raised when a runtime process exceeds an execution deadline."""
 
 
 @dataclass(frozen=True)
@@ -74,9 +82,28 @@ class BitNetRuntime:
             )
             self._logger.addHandler(handler)
         self._logger.setLevel(self._coerce_log_level(log_level))
+        self._last_execution: Optional[float] = None
 
     # ------------------------------------------------------------------
     # Public API
+
+    @property
+    def cpu_count(self) -> int:
+        """Number of logical CPU cores detected on initialisation."""
+
+        return self._cpu_count
+
+    @property
+    def environment(self) -> Mapping[str, str]:
+        """Read-only view of the environment variables used for launches."""
+
+        return MappingProxyType(self._env)
+
+    @property
+    def last_execution_timestamp(self) -> Optional[float]:
+        """UTC timestamp of the most recent successful process execution."""
+
+        return self._last_execution
 
     def run_inference(
         self,
@@ -181,6 +208,8 @@ class BitNetRuntime:
         except subprocess.CalledProcessError as exc:
             self._logger.error("Runtime process exited with %s", exc.returncode)
             raise RuntimeLaunchError(str(exc)) from exc
+        else:
+            self._last_execution = time.time()
         return completed.returncode
 
     def _build_inference_command(
