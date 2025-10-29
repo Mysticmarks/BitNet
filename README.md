@@ -15,6 +15,9 @@ The first release of bitnet.cpp is to support inference on CPUs. bitnet.cpp achi
 - **System Roadmap & Scope Register:** [docs/system-roadmap.md](docs/system-roadmap.md) tracks capability maturity, owners, and milestone planning across all phases of the autonomous development loop.
 - **Iteration Log:** [docs/iteration-log.md](docs/iteration-log.md) records autonomous refinement cycles and links to future actions for Phases 4–12.
 - **Runtime Supervisor Guide:** [docs/runtime_supervisor.md](docs/runtime_supervisor.md) explains asynchronous orchestration patterns and telemetry hooks.
+- **Deployment Guide:** [docs/deployment.md](docs/deployment.md) consolidates repeatable build, container, Kubernetes, and edge deployment instructions.
+
+> SRD last updated: 2025-05-28
 
 <img src="./assets/m2_performance.jpg" alt="m2_performance" width="800"/>
 <img src="./assets/intel_performance.jpg" alt="m2_performance" width="800"/>
@@ -196,32 +199,28 @@ conda activate bitnet-cpp
 
 pip install -r requirements.txt
 ```
+
+Install the packaged Python utilities directly:
+
+```bash
+pip install .
+```
 3. Build the project
 ```bash
-# Manually download the model and run with local path
-huggingface-cli download microsoft/BitNet-b1.58-2B-4T-gguf --local-dir models/BitNet-b1.58-2B-4T
-python setup_env.py -md models/BitNet-b1.58-2B-4T -q i2_s
-
+cmake -S . -B build
+cmake --build build -j
 ```
-<pre>
-usage: setup_env.py [-h] [--hf-repo {1bitLLM/bitnet_b1_58-large,1bitLLM/bitnet_b1_58-3B,HF1BitLLM/Llama3-8B-1.58-100B-tokens,tiiuae/Falcon3-1B-Instruct-1.58bit,tiiuae/Falcon3-3B-Instruct-1.58bit,tiiuae/Falcon3-7B-Instruct-1.58bit,tiiuae/Falcon3-10B-Instruct-1.58bit}] [--model-dir MODEL_DIR] [--log-dir LOG_DIR] [--quant-type {i2_s,tl1}] [--quant-embd]
-                    [--use-pretuned]
 
-Setup the environment for running inference
+To run the fully automated bootstrapper with caching and Hugging Face downloads
+enabled, execute:
 
-optional arguments:
-  -h, --help            show this help message and exit
-  --hf-repo {1bitLLM/bitnet_b1_58-large,1bitLLM/bitnet_b1_58-3B,HF1BitLLM/Llama3-8B-1.58-100B-tokens,tiiuae/Falcon3-1B-Instruct-1.58bit,tiiuae/Falcon3-3B-Instruct-1.58bit,tiiuae/Falcon3-7B-Instruct-1.58bit,tiiuae/Falcon3-10B-Instruct-1.58bit}, -hr {1bitLLM/bitnet_b1_58-large,1bitLLM/bitnet_b1_58-3B,HF1BitLLM/Llama3-8B-1.58-100B-tokens,tiiuae/Falcon3-1B-Instruct-1.58bit,tiiuae/Falcon3-3B-Instruct-1.58bit,tiiuae/Falcon3-7B-Instruct-1.58bit,tiiuae/Falcon3-10B-Instruct-1.58bit}
-                        Model used for inference
-  --model-dir MODEL_DIR, -md MODEL_DIR
-                        Directory to save/load the model
-  --log-dir LOG_DIR, -ld LOG_DIR
-                        Directory to save the logging info
-  --quant-type {i2_s,tl1}, -q {i2_s,tl1}
-                        Quantization type
-  --quant-embd          Quantize the embeddings to f16
-  --use-pretuned, -p    Use the pretuned kernel parameters
-</pre>
+```bash
+python setup_env.py --hf-repo microsoft/BitNet-b1.58-2B-4T --cache-dir ~/.cache/bitnet
+```
+
+Use `python setup_env.py --help` to inspect additional options such as
+`--skip-build`, `--skip-model`, and `--force` when re-running on provisioned
+machines.
 ## Usage
 ### Basic usage
 ```bash
