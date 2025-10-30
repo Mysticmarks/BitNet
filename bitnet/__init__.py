@@ -1,5 +1,7 @@
 """High-level runtime utilities for BitNet Python entrypoints."""
 
+__version__ = "0.1.0"
+
 from .runtime import (
     BitNetRuntime,
     HealthProbe,
@@ -23,4 +25,5 @@ __all__ = [
     "RuntimeSupervisor",
     "RuntimeTimeoutError",
     "TelemetryEvent",
+    "__version__",
 ]

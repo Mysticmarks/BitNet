@@ -4,6 +4,24 @@ include(CheckIncludeFileCXX)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+option(BITNET_ENABLE_CLANG_TIDY "Run clang-tidy during builds" OFF)
+option(BITNET_ENABLE_SANITIZERS "Enable address/undefined sanitizers" OFF)
+
+if (BITNET_ENABLE_CLANG_TIDY)
+    find_program(CLANG_TIDY_EXE NAMES clang-tidy)
+    if (CLANG_TIDY_EXE)
+        set(CMAKE_C_CLANG_TIDY ${CLANG_TIDY_EXE} -warnings-as-errors=*)
+        set(CMAKE_CXX_CLANG_TIDY ${CLANG_TIDY_EXE} -warnings-as-errors=*)
+    else()
+        message(WARNING "clang-tidy requested but binary not found")
+    endif()
+endif()
+
+if (BITNET_ENABLE_SANITIZERS)
+    add_compile_options(-fsanitize=address -fsanitize=undefined)
+    add_link_options(-fsanitize=address -fsanitize=undefined)
+endif()
+
 if (NOT XCODE AND NOT MSVC AND NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
     set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "MinSizeRel" "RelWithDebInfo")

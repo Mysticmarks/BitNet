@@ -67,5 +67,74 @@ binaries and GGUF artefacts available in CI.
 - Emit JSON diagnostics via structured logging for richer dashboards.
 - Introduce GPU-aware runtime helpers that detect the available accelerators and
   pick the optimal binary automatically.
-- Provide container images or IaC templates that package the runtime and
-  supervisor for fleet deployment.
+- Extend reproducible infrastructure definitions to cover GPU node pools and
+  service meshes.
+
+## 6. Turnkey deployments
+
+BitNet now ships repeatable deployment assets that reduce the amount of custom
+plumbing required to move from local experiments to managed infrastructure.  CI
+guarantees that these assets stay in sync with the runtime codebase.
+
+### 6.1 Container images
+
+- `infra/docker/bitnet-runtime.Dockerfile` produces a multi-stage image that
+  compiles the llama.cpp binaries, builds the Python wheel via `python -m
+  build`, and copies the artefacts into a slim runtime layer.  The pinned base
+  image (`python:3.11.9-slim-bookworm`) and explicit labels make the build
+  reproducible and traceable.
+- `infra/docker/bitnet-edge.Dockerfile` targets edge or offline devices.  It
+  retains a Python virtual environment in the final layer so administrators can
+  upgrade packages without rebuilding the container.  The Dockerfile works with
+  `docker buildx build --platform linux/amd64,linux/arm64` for multi-arch
+  publishing.
+
+Both Dockerfiles expose the `run_inference.py` entrypoint by default.  Override
+the command to launch the HTTP server instead:
+
+```bash
+docker run --rm -p 8080:8080 bitnet-runtime \
+  run_inference_server.py --model /models/bitnet.gguf --host 0.0.0.0
+```
+
+### 6.2 Kubernetes deployment (Terraform)
+
+The Terraform module under `infra/terraform/` provisions:
+
+1. A namespace to isolate BitNet resources.
+2. A `Secret` that stores the model location (typically a signed URL or object
+   store reference).
+3. A `ConfigMap` holding CLI arguments so operators can tweak runtime flags
+   without rebuilding images.
+4. A `Deployment` + `Service` pairing that exposes the runtime on port 80 by
+   default, including liveness and readiness probes that hit the `/health`
+   endpoint.
+
+Usage pattern:
+
+```bash
+cd infra/terraform
+terraform init -backend=false
+terraform apply -var="model_url=https://example.com/models/bitnet.gguf"
+```
+
+The deployment mounts the container image declared via `var.image` and runs
+`run_inference_server.py --host 0.0.0.0 --model $(MODEL_URL)`, ensuring the same
+command path as local usage.  Update `var.resource_limits` and
+`var.resource_requests` to fit the cluster sizing.
+
+### 6.3 Edge device bootstrap
+
+For devices that cannot run containers, the refactored `setup_env.py` offers an
+idempotent bootstrapper:
+
+```bash
+python setup_env.py --model-dir /models --hf-repo microsoft/BitNet-b1.58-2B-4T \
+  --cache-dir /var/cache/bitnet
+```
+
+The script caches pip downloads under the supplied cache directory, tracks
+completed stages in `.cache/bitnet/bootstrap-state.json`, and can be invoked
+multiple times without repeating heavy work.  Combine it with the
+`infra/docker/bitnet-edge.Dockerfile` build instructions to pre-provision
+virtual environments that can be rsynced onto constrained devices.
