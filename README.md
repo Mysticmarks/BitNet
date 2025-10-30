@@ -355,6 +355,15 @@ python -m unittest discover -s tests
 The tests are safe to run without downloading models or compiling native code; they validate the command runner and configuration
 guards used by `setup_env.py`.
 
+#### Advanced validation matrix
+
+- `tests/test_integration_kernels.py` builds minimal CPU/GPU inference executables through CMake and validates kernel correctness. GPU checks are skipped when CUDA tooling is not detected.
+- `tests/test_cli_properties.py` and `tests/test_supervisor_properties.py` rely on property-based fuzzing (powered by Hypothesis) to harden CLI parsing and asynchronous scheduling.
+- `tests/test_performance_profiles.py` runs deterministic latency/throughput smoke tests to surface regressions in token generation speed.
+- `tests/test_gpu_kernel_unit.py` compiles a CUDA micro-kernel with PyTorch extensions to sanity check PTX/ROCm execution paths.
+
+Install optional dependencies for these scenarios via `pip install -r tests/requirements-test.txt`.
+
 ### FAQ (Frequently Asked Questions)📌
 
 #### Q1: The build dies with errors building llama.cpp due to issues with std::chrono in log.cpp?
