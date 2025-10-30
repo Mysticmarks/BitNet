@@ -2,11 +2,17 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import List
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from bitnet import BitNetRuntime, RuntimeConfigurationError  # noqa: E402
+from bitnet import (
+    BitNetRuntime,
+    RuntimeConfigurationError,
+    RuntimeLaunchError,
+    TelemetryEvent,
+)  # noqa: E402
 
 
 class BitNetRuntimeTests(unittest.TestCase):
@@ -92,6 +98,9 @@ class BitNetRuntimeTests(unittest.TestCase):
         self.assertTrue(info["binaries"]["llama-cli"])
         self.assertTrue(info["binaries"]["llama-server"])
         self.assertTrue(info["model_present"])
+        self.assertIn("probes", info)
+        self.assertIn("disk", info["probes"])
+        self.assertIn("memory", info["probes"])
 
     def test_missing_binaries_raise_informative_error(self):
         runtime = BitNetRuntime(build_dir=self.build_dir / "missing")
@@ -102,6 +111,72 @@ class BitNetRuntimeTests(unittest.TestCase):
                 dry_run=True,
             )
         self.assertIn("Unable to locate", str(ctx.exception))
+
+    def test_telemetry_sink_receives_events(self):
+        runtime = BitNetRuntime(build_dir=self.build_dir)
+        events: List[TelemetryEvent] = []
+        runtime.add_telemetry_sink(events.append)
+
+        script = self.build_dir.parent / "echo.py"
+        script.write_text("print('hello')\n")
+        runtime._execute([sys.executable, str(script)])
+
+        self.assertTrue(any(evt.name == "runtime.execute.start" for evt in events))
+        self.assertTrue(runtime.recent_events())
+
+    def test_execute_retries_and_metrics(self):
+        runtime = BitNetRuntime(
+            build_dir=self.build_dir,
+            max_retries=1,
+            retry_backoff_base=0.0,
+        )
+        script = self.build_dir.parent / "flaky.py"
+        state_path = self.build_dir.parent / "flaky_state.txt"
+        script.write_text(
+            "import pathlib, sys\n"
+            "state = pathlib.Path(sys.argv[1])\n"
+            "count = int(state.read_text()) if state.exists() else 0\n"
+            "count += 1\n"
+            "state.write_text(str(count))\n"
+            "if count < 2:\n"
+            "    print('fail', file=sys.stderr)\n"
+            "    sys.exit(1)\n"
+            "print('ok')\n"
+        )
+
+        chunks: List[str] = []
+
+        def consumer(stream: str, data: str) -> None:
+            chunks.append(f"{stream}:{data.strip()}")
+
+        returncode = runtime._execute(
+            [sys.executable, str(script), str(state_path)],
+            stream_consumer=consumer,
+        )
+        self.assertEqual(returncode, 0)
+        metrics = runtime.metrics_snapshot()
+        self.assertGreaterEqual(metrics["executions.retry"], 1)
+        self.assertIn("stdout:ok", {chunk.replace(" ", "") for chunk in chunks})
+
+    def test_circuit_breaker_blocks_after_failures(self):
+        runtime = BitNetRuntime(
+            build_dir=self.build_dir,
+            max_retries=0,
+            retry_backoff_base=0.0,
+            circuit_breaker_threshold=1,
+            circuit_breaker_reset=5.0,
+        )
+        script = self.build_dir.parent / "always_fail.py"
+        script.write_text("import sys; sys.exit(1)\n")
+
+        with self.assertRaises(RuntimeLaunchError):
+            runtime._execute([sys.executable, str(script)])
+
+        with self.assertRaises(RuntimeLaunchError) as ctx:
+            runtime._execute([sys.executable, str(script)])
+        self.assertIn("circuit", str(ctx.exception).lower())
+        metrics = runtime.metrics_snapshot()
+        self.assertGreaterEqual(metrics["executions.circuit_open"], 1)
 
 
 if __name__ == "__main__":
