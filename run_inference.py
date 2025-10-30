@@ -28,6 +28,18 @@ def _parse_threads(value: str) -> Optional[int]:
     return parsed
 
 
+def _parse_gpu_layers(value: str) -> Optional[int]:
+    if value.lower() == "auto":
+        return None
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("GPU layers must be 'auto' or an integer") from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("GPU layers must be zero or a positive integer")
+    return parsed
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run BitNet inference via llama.cpp")
     parser.add_argument("-m", "--model", type=Path, help="Path to the GGUF model", required=True)
@@ -39,9 +51,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-b", "--batch-size", type=int, default=1, help="Prompt batch size")
     parser.add_argument(
         "--gpu-layers",
-        type=int,
-        default=0,
-        help="Number of layers to offload to the GPU (requires GPU build)",
+        type=_parse_gpu_layers,
+        default=None,
+        help="Number of layers to offload to the GPU or 'auto' for heuristics",
     )
     parser.add_argument("-cnv", "--conversation", action="store_true", help="Enable chat mode")
     parser.add_argument(
