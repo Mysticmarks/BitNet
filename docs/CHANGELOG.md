@@ -1,0 +1,44 @@
+# Changelog
+
+_Generated from `git log` as of 2025-10-29. Run `python utils/generate_changelog.py` to refresh._
+
+- 2025-10-29 5b816af Merge pull request #6 from Mysticmarks/codex/implement-autonomous-multi-round-development-process
+- 2025-10-29 1d83c6e docs: establish srd and roadmap scaffolding
+- 2025-10-28 f4c91a3 Merge pull request #5 from Mysticmarks/codex/assess-system-completeness-and-deployability
+- 2025-10-28 16a892f Add asyncio runtime supervisor with concurrency controls
+- 2025-10-28 47bf876 Merge pull request #4 from Mysticmarks/codex/evaluate-system-completeness-and-performance
+- 2025-10-28 009a85b Add GPU layer configuration to runtime interfaces
+- 2025-10-27 bbcc70f Merge pull request #3 from Mysticmarks/codex/evaluate-system-completeness-and-deployment-readiness
+- 2025-10-27 f8905b4 Refactor runtime launch scripts with shared orchestration
+- 2025-10-27 f60b632 Merge pull request #2 from Mysticmarks/codex/assess-system-completeness-and-performance
+- 2025-10-27 808666a Improve tooling reliability for BitNet
+- 2025-10-26 631a2c1 Merge pull request #1 from Mysticmarks/codex/assess-system-completeness-and-deployability
+- 2025-10-26 1fc15c5 Refine setup workflow and add sanity tests
+- 2025-06-03 404980e Merge pull request #290 from microsoft/gpu-readme-dev
+- 2025-06-03 088e607 Merge pull request #280 from microsoft/fix-convert-dev
+- 2025-05-31 c1e9a9a Update readme for gpu kernels
+- 2025-05-21 43e9b2d Enable conversion from .safetensors checkpoints to gguf files
+- 2025-05-21 69a2045 Merge pull request #268 from younesbelkada/add-falcon-e-final
+- 2025-05-21 5c12850 Merge branch 'add-falcon-e-final' of github.com:younesbelkada/BitNet into add-falcon-e-final
+- 2025-05-21 765741d update submodule
+- 2025-05-21 f314d18 feat: add also base models
+- 2025-05-20 9e95756 Merge branch 'microsoft:main' into add-falcon-e-final
+- 2025-05-20 70285e0 Merge pull request #276 from microsoft/readme-dev
+- 2025-05-20 6197e9f refine readme for gpu kernel
+- 2025-05-19 6c2c08f Merge pull request #266 from microsoft/gpu-dev
+- 2025-05-15 154c92b Init gpu branch
+- 2025-05-15 0015ad5 Update README.md
+- 2025-05-14 de371b7 add falcon-e support
+- 2025-05-08 c9e752c Fix build error with GCC by forcing Clang compiler in CMake on android/aarch64 (#242)
+- 2025-05-08 1792346 Add run_inference_server.py for Running llama.cpp Built-in Server (#204)
+- 2025-04-23 c17d1c5 Merge pull request #212 from microsoft/arch-name-dev
+- 2025-04-22 488dc1e Fix model architecture name
+- 2025-04-16 fd9f1d6 Merge pull request #176 from microsoft/readme-dev
+- 2025-04-16 874e6bd refine readme
+- 2025-04-15 034b34c Merge pull request #175 from microsoft/readme-dev
+- 2025-04-15 71fdd94 add third-party demo
+- 2025-04-15 1c77bd8 Update README.md
+- 2025-04-15 8f75f99 Update README.md (#172)
+- 2025-04-15 0e7dadb Update README.md
+- 2025-04-15 fd3f355 update readme and setup script to support official BitNet b1.58 model  (#171)
+- 2025-04-15 fa854cf Merge pull request #167 from potassiummmm/bitnet-25

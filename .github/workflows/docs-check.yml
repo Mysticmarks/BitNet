@@ -1,0 +1,35 @@
+name: Docs Review Guardrail
+
+on:
+  pull_request:
+    paths:
+      - 'bitnet/**'
+      - 'run_inference.py'
+      - 'run_inference_server.py'
+      - 'src/**'
+      - 'gpu/**'
+      - 'docs/**'
+      - 'README.md'
+      - 'utils/**'
+      - '.github/workflows/docs-check.yml'
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate documentation sync
+        run: python utils/check_docs_sync.py
+      - name: Ensure generated docs are current
+        run: |
+          python utils/generate_architecture_docs.py
+          python utils/generate_api_reference.py
+          python utils/generate_changelog.py --limit 40
+          git diff --exit-code

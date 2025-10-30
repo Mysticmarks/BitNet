@@ -6,15 +6,19 @@
 
 Try it out via this [demo](https://bitnet-demo.azurewebsites.net/), or build and run it on your own [CPU](https://github.com/microsoft/BitNet?tab=readme-ov-file#build-from-source) or [GPU](https://github.com/microsoft/BitNet/blob/main/gpu/README.md).
 
-bitnet.cpp is the official inference framework for 1-bit LLMs (e.g., BitNet b1.58). It offers a suite of optimized kernels, that support **fast** and **lossless** inference of 1.58-bit models on CPU and GPU (NPU support will coming next).
+bitnet.cpp is the official inference framework for 1-bit LLMs (e.g., BitNet b1.58). It offers a suite of optimized kernels that support **fast** and **lossless** inference of 1.58-bit models on CPU and GPU. NPU backends are on the roadmap but are **not yet available** in this repository.
 
 The first release of bitnet.cpp is to support inference on CPUs. bitnet.cpp achieves speedups of **1.37x** to **5.07x** on ARM CPUs, with larger models experiencing greater performance gains. Additionally, it reduces energy consumption by **55.4%** to **70.0%**, further boosting overall efficiency. On x86 CPUs, speedups range from **2.37x** to **6.17x** with energy reductions between **71.9%** to **82.2%**. Furthermore, bitnet.cpp can run a 100B BitNet b1.58 model on a single CPU, achieving speeds comparable to human reading (5-7 tokens per second), significantly enhancing the potential for running LLMs on local devices. Please refer to the [technical report](https://arxiv.org/abs/2410.16144) for more details.
 
 ## Documentation Map
-- **System Requirements Document (SRD):** [docs/system-requirements.md](docs/system-requirements.md) captures the authoritative scope, architecture, and quality targets for the full stack.
-- **System Roadmap & Scope Register:** [docs/system-roadmap.md](docs/system-roadmap.md) tracks capability maturity, owners, and milestone planning across all phases of the autonomous development loop.
+- **System Requirements Document (SRD):** [docs/system-requirements.md](docs/system-requirements.md) captures the authoritative scope, architecture, and quality targets for the shipped stack.
+- **System Roadmap & Scope Register:** [docs/system-roadmap.md](docs/system-roadmap.md) tracks capability maturity, owners, and milestone planning with a focus on what exists today versus planned milestones.
+- **Architecture Overview:** [docs/architecture.md](docs/architecture.md) provides generated diagrams that mirror the current module layout.
+- **API Reference:** [docs/api-reference.md](docs/api-reference.md) describes the Python entry points and CLI surfaces that are actively maintained.
+- **Docs Review Checklist:** [docs/docs-review-checklist.md](docs/docs-review-checklist.md) is enforced in CI to keep interfaces and documentation aligned.
+- **Changelog:** [docs/CHANGELOG.md](docs/CHANGELOG.md) is generated from Git history to prevent drift between releases and documentation.
 - **Iteration Log:** [docs/iteration-log.md](docs/iteration-log.md) records autonomous refinement cycles and links to future actions for Phases 4–12.
-- **Runtime Supervisor Guide:** [docs/runtime_supervisor.md](docs/runtime_supervisor.md) explains asynchronous orchestration patterns and telemetry hooks.
+- **Runtime Supervisor Guide:** [docs/runtime_supervisor.md](docs/runtime_supervisor.md) explains asynchronous orchestration patterns and telemetry hooks backed by `bitnet.supervisor`.
 
 <img src="./assets/m2_performance.jpg" alt="m2_performance" width="800"/>
 <img src="./assets/intel_performance.jpg" alt="m2_performance" width="800"/>
@@ -158,6 +162,14 @@ This project is based on the [llama.cpp](https://github.com/ggerganov/llama.cpp)
         <td>&#10060;</td>
     </tr>
 </table>
+
+## Current Limitations
+
+- **GPU diagnostics**: The Python runtime only verifies CPU resources today. GPU presence, driver versions, and memory checks are tracked on the roadmap and currently require manual verification.
+- **Automated deployment**: Container images and infrastructure-as-code recipes are not yet published. Use the manual workflow in [`docs/deployment.md`](docs/deployment.md) until the DevOps milestone lands.
+- **Documentation automation**: Architecture diagrams and changelog files are generated via repository scripts, but contributors must re-run them locally as part of the docs review checklist.
+
+See [docs/system-roadmap.md](docs/system-roadmap.md) for owners and timelines associated with closing these gaps.
 
 
 

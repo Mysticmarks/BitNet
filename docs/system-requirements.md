@@ -7,9 +7,9 @@ bitnet.cpp delivers high-performance inference for 1-bit and ternary LLMs on CPU
 
 ### Success Criteria
 - End users can execute inference or start the HTTP server with a one-command setup on supported platforms.
-- Runtime diagnostics clearly surface missing binaries, configuration issues, or model assets.
+- Runtime diagnostics clearly surface missing binaries, configuration issues, or model assets. GPU health checks are a roadmap item and not yet enforced.
 - Benchmarks demonstrate parity with documented speedups in the README and research papers.
-- Documentation, tooling, and scripts remain synchronized and reproducible across CPU and GPU pathways.
+- Documentation, tooling, and scripts remain synchronized and reproducible across CPU and GPU pathways via the docs review checklist.
 
 ## 2. Stakeholders & Personas
 - **Model Engineers**: optimise kernels or add hardware backends.
@@ -39,12 +39,13 @@ The system interacts with the following artefacts:
 - Allow optional prompt priming for server bootstrapping.
 
 ### 4.3 Runtime Supervision
-- Offer asynchronous orchestration through `RuntimeSupervisor` with concurrency limits, timeout handling, and structured telemetry (see `docs/runtime_supervisor.md`).
+- Offer asynchronous orchestration through `RuntimeSupervisor` with concurrency limits and timeout handling (see `docs/runtime_supervisor.md`). Telemetry exporters are not bundled and should be implemented per deployment.
 
 ### 4.4 Tooling & Utilities
 - Conversion of `.safetensors` checkpoints to GGUF via `utils/convert-helper-bitnet.py`.
 - Benchmark generation with dummy model creation (`utils/generate-dummy-bitnet-model.py`) and execution (`utils/e2e_benchmark.py`).
 - Environment bootstrapping for CPU/GPU builds using `setup_env.py`.
+- Documentation automation helpers located in `utils/` keep reference docs in sync (`generate_architecture_docs.py`, `generate_api_reference.py`, `generate_changelog.py`).
 
 ### 4.5 Testing & Quality Gates
 - Python unit tests validate CLI argument parsing, runtime configuration guards, and command assembly (`tests`).
@@ -79,8 +80,9 @@ The system interacts with the following artefacts:
 
 ### 6.3 Deployment Topologies
 - **Local CPU**: Build via `setup_env.py --cpu` or manual CMake invocation; run CLI with GGUF model.
-- **Local GPU**: Follow `gpu/README.md` instructions to compile CUDA/ROCm kernels and run CLI with `--gpu-layers`.
+- **Local GPU**: Follow `gpu/README.md` instructions to compile CUDA/ROCm kernels and run CLI with `--gpu-layers`. GPU readiness must currently be validated manually.
 - **Service Integration**: Embed `BitNetRuntime` in orchestration services, using diagnostics and dry-run for health checks.
+- **Automated deployments**: Container images and IaC templates are future work. Track progress in the roadmap before promising fleet rollouts.
 
 ## 7. Module Interfaces
 - `BitNetRuntime.run_inference(...) -> Sequence[str] | int`: constructs or executes command.
@@ -98,6 +100,8 @@ Refer to `docs/system-roadmap.md` for the living roadmap and milestone tracking,
 
 ## 10. Open Risks & Assumptions
 - GPU kernels may lag behind CPU feature parity; ensure documentation highlights gaps.
+- Runtime diagnostics do not yet validate GPU presence or driver versions.
+- Automated deployment assets (container images, IaC) are not published; follow `docs/deployment.md` for manual steps.
 - Benchmark scripts assume availability of Python dependencies listed in `requirements.txt`.
 - Large-model inference demands sufficient RAM; out-of-memory handling is delegated to llama.cpp binaries.
 
