@@ -1,0 +1,229 @@
+:root {
+  color-scheme: dark light;
+  --bg-dark: #0f172a;
+  --bg-light: #f8fafc;
+  --text-dark: #e2e8f0;
+  --text-light: #0f172a;
+  --card-dark: rgba(30, 41, 59, 0.8);
+  --card-light: rgba(226, 232, 240, 0.9);
+  --accent-hue: 264;
+  --accent-sat: 85%;
+  --accent-light: 65%;
+}
+
+body[data-theme="dark"] {
+  background: radial-gradient(circle at top left, rgba(148, 163, 184, 0.12), transparent),
+    var(--bg-dark);
+  color: var(--text-dark);
+}
+
+body[data-theme="light"] {
+  background: radial-gradient(circle at top left, rgba(30, 41, 59, 0.1), transparent),
+    var(--bg-light);
+  color: var(--text-light);
+}
+
+body {
+  margin: 0;
+  font-family: "Inter", system-ui, sans-serif;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+header {
+  padding: 1.5rem 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  background: linear-gradient(135deg, hsla(var(--accent-hue), var(--accent-sat), 30%, 0.35), transparent);
+}
+
+header h1 {
+  margin: 0;
+  font-size: 1.8rem;
+}
+
+.status-badges {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.badge {
+  padding: 0.4rem 0.75rem;
+  border-radius: 999px;
+  background: hsla(var(--accent-hue), var(--accent-sat), var(--accent-light), 0.15);
+  border: 1px solid hsla(var(--accent-hue), var(--accent-sat), var(--accent-light), 0.35);
+  font-size: 0.85rem;
+}
+
+.badge .value {
+  font-weight: 600;
+}
+
+.badge.healthy {
+  background: rgba(34, 197, 94, 0.18);
+  border-color: rgba(34, 197, 94, 0.4);
+  color: rgba(34, 197, 94, 0.95);
+}
+
+main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem;
+  padding: 1.5rem 2rem 3rem;
+}
+
+section {
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.04), rgba(148, 163, 184, 0.06));
+  border-radius: 1.25rem;
+  padding: 1.5rem;
+  box-shadow: 0 24px 48px -32px rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(18px);
+}
+
+section h2 {
+  margin-top: 0;
+  font-size: 1.25rem;
+  letter-spacing: 0.02em;
+}
+
+.charts {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.chart-card {
+  flex: 1 1 160px;
+  background: rgba(15, 23, 42, 0.45);
+  padding: 1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+body[data-theme="light"] .chart-card {
+  background: rgba(255, 255, 255, 0.75);
+  border-color: rgba(100, 116, 139, 0.35);
+}
+
+.chart-value {
+  font-size: 2.4rem;
+  font-weight: 700;
+  margin-top: 0.75rem;
+}
+
+form {
+  display: grid;
+  gap: 0.9rem;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+
+input,
+select,
+button {
+  font: inherit;
+  border-radius: 0.65rem;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  padding: 0.6rem 0.8rem;
+  background: rgba(15, 23, 42, 0.45);
+  color: inherit;
+}
+
+body[data-theme="light"] input,
+body[data-theme="light"] select,
+body[data-theme="light"] button {
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--text-light);
+}
+
+button {
+  cursor: pointer;
+  background: hsla(var(--accent-hue), var(--accent-sat), var(--accent-light), 0.25);
+  border-color: hsla(var(--accent-hue), var(--accent-sat), var(--accent-light), 0.55);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 30px -12px hsla(var(--accent-hue), var(--accent-sat), var(--accent-light), 0.45);
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+#config-feedback {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  min-height: 1.25rem;
+}
+
+#config-feedback.error {
+  color: rgba(248, 113, 113, 0.95);
+}
+
+#config-feedback.success {
+  color: rgba(134, 239, 172, 0.95);
+}
+
+.theme-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+}
+
+footer {
+  padding: 1rem 2rem 2rem;
+  font-size: 0.85rem;
+  text-align: center;
+  opacity: 0.75;
+}
+
+#help-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.75);
+  display: grid;
+  place-items: center;
+  backdrop-filter: blur(6px);
+}
+
+#help-overlay[hidden] {
+  display: none;
+}
+
+.overlay-content {
+  background: rgba(15, 23, 42, 0.9);
+  padding: 2rem;
+  border-radius: 1rem;
+  max-width: 480px;
+  box-shadow: 0 24px 64px -32px rgba(15, 23, 42, 0.9);
+}
+
+.overlay-content ul {
+  list-style: none;
+  padding: 0;
+  margin: 1rem 0 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+@media (max-width: 768px) {
+  header,
+  main,
+  footer {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+}

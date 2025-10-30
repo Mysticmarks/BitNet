@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BitNet Control Center</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body data-theme="dark">
+    <header>
+      <h1>BitNet Control Center</h1>
+      <div class="status-badges">
+        <span id="model-status" class="badge">Model: <span class="value">n/a</span></span>
+        <span id="preset-status" class="badge">Preset: <span class="value">balanced</span></span>
+        <span id="backend-status" class="badge healthy">Backend: healthy</span>
+      </div>
+    </header>
+    <main>
+      <section class="telemetry">
+        <h2>Real-time Telemetry</h2>
+        <div class="charts">
+          <div class="chart-card">
+            <h3>Tokens / s</h3>
+            <div id="tokens-chart" class="chart-value">0</div>
+          </div>
+          <div class="chart-card">
+            <h3>Queue Depth</h3>
+            <div id="queue-chart" class="chart-value">0</div>
+          </div>
+          <div class="chart-card">
+            <h3>Temperature</h3>
+            <div id="temperature-chart" class="chart-value">0.0</div>
+          </div>
+        </div>
+      </section>
+      <section class="configuration">
+        <h2>Configuration</h2>
+        <form id="config-form">
+          <label>
+            Model path
+            <input type="text" name="model" placeholder="/path/to/model.gguf" />
+          </label>
+          <label>
+            Preset
+            <select name="preset">
+              <option value="balanced">Balanced</option>
+              <option value="latency">Low latency</option>
+              <option value="quality">High quality</option>
+            </select>
+          </label>
+          <label>
+            Tokens to predict
+            <input type="number" name="n_predict" min="1" max="8192" />
+          </label>
+          <label>
+            Context size
+            <input type="number" name="ctx_size" min="256" max="16384" />
+          </label>
+          <label>
+            Temperature
+            <input type="number" step="0.05" name="temperature" min="0.1" max="1.5" />
+          </label>
+          <label>
+            Batch size
+            <input type="number" name="batch_size" min="1" max="32" />
+          </label>
+          <label>
+            GPU layers
+            <input type="number" name="gpu_layers" min="0" max="512" />
+          </label>
+          <div class="form-actions">
+            <button type="submit">Apply changes (Ctrl+S)</button>
+          </div>
+        </form>
+        <div id="config-feedback" role="status"></div>
+      </section>
+      <section class="theme">
+        <h2>Theming</h2>
+        <div class="theme-controls">
+          <label>
+            Mode
+            <select id="theme-mode">
+              <option value="system">System</option>
+              <option value="dark" selected>Dark</option>
+              <option value="light">Light</option>
+            </select>
+          </label>
+          <label>
+            Accent seed
+            <input type="range" id="accent-seed" min="0" max="360" value="264" />
+          </label>
+          <button id="apply-theme">Apply theme (Shift+L)</button>
+        </div>
+      </section>
+    </main>
+    <footer>
+      <p>Keyboard shortcuts: Shift+L toggle theme, Shift+P open preset selector, ? show help overlay.</p>
+    </footer>
+    <div id="help-overlay" hidden>
+      <div class="overlay-content">
+        <h2>Command palette</h2>
+        <ul>
+          <li><strong>Shift + L</strong> — toggle dark mode</li>
+          <li><strong>Shift + P</strong> — focus preset selector</li>
+          <li><strong>Ctrl + S</strong> — submit configuration</li>
+          <li><strong>Esc</strong> — close overlay</li>
+        </ul>
+      </div>
+    </div>
+    <script src="/static/app.js" type="module"></script>
+  </body>
+</html>

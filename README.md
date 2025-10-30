@@ -15,6 +15,23 @@ The first release of bitnet.cpp is to support inference on CPUs. bitnet.cpp achi
 - **System Roadmap & Scope Register:** [docs/system-roadmap.md](docs/system-roadmap.md) tracks capability maturity, owners, and milestone planning across all phases of the autonomous development loop.
 - **Iteration Log:** [docs/iteration-log.md](docs/iteration-log.md) records autonomous refinement cycles and links to future actions for Phases 4–12.
 - **Runtime Supervisor Guide:** [docs/runtime_supervisor.md](docs/runtime_supervisor.md) explains asynchronous orchestration patterns and telemetry hooks.
+- **Interface Requirements & Flows:** [docs/interface_requirements.md](docs/interface_requirements.md) aligns UX goals across CLI, TUI, dashboard, and service APIs.
+
+## Operator Interfaces
+
+BitNet now ships a cohesive control surface that spans the CLI, an interactive web dashboard, and programmable APIs.
+
+### Enhanced CLI
+
+- Preset-aware execution via `--preset`, `--list-presets`, and `--show-config` with automatic safety checks.
+- Contextual help for advanced flags using `--explain <flag>` and theme-aware summaries driven by `BITNET_CLI_THEME`.
+- Interactive prompt capture (press <kbd>Ctrl</kbd>+<kbd>D</kbd> to submit) plus keyboard shortcuts surfaced in the help text.
+
+### Dashboard & APIs
+
+- Launch the modular dashboard with `uvicorn bitnet.dashboard.app:create_app --factory --reload` after installing optional dependencies from `requirements-dashboard.txt`.
+- Real-time telemetry charts stream from `/api/metrics/stream` (Server-Sent Events) while configuration and theming go through `/api/config` and `/api/theme`.
+- Dark/light theming with procedural accent palettes powered by the `accent_seed` slider and keyboard shortcuts (Shift+L, Shift+P, `?`).
 
 <img src="./assets/m2_performance.jpg" alt="m2_performance" width="800"/>
 <img src="./assets/intel_performance.jpg" alt="m2_performance" width="800"/>
