@@ -1,0 +1,7 @@
+# BitNet CPU integration smoke fixture
+rows=3
+cols=4
+input=0.25,-0.75,0.5,1.0
+scales=0.75,0.5,0.9
+weights=27,228,85
+expected=0.93382806,-0.5545997,0.0
