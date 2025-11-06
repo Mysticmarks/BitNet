@@ -1,6 +1,6 @@
 # System Roadmap & Scope Register
 
-_Last updated: 2025-05-23_
+_Last updated: 2025-05-30_
 
 ## Vision
 Deliver a production-grade BitNet inference stack that runs efficiently across CPU, GPU, and future accelerator backends with cohesive tooling, documentation, and automation.

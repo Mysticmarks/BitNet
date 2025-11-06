@@ -16,8 +16,11 @@ The first release of bitnet.cpp is to support inference on CPUs. bitnet.cpp achi
 - **Iteration Log:** [docs/iteration-log.md](docs/iteration-log.md) records autonomous refinement cycles and links to future actions for Phases 4–12.
 - **Runtime Supervisor Guide:** [docs/runtime_supervisor.md](docs/runtime_supervisor.md) explains asynchronous orchestration patterns and telemetry hooks.
 - **Deployment Guide:** [docs/deployment.md](docs/deployment.md) consolidates repeatable build, container, Kubernetes, and edge deployment instructions.
+- **Telemetry Dashboards:** [docs/telemetry-dashboards.md](docs/telemetry-dashboards.md) captures real-time observability profiles for TUI and web experiences.
+- **Documentation Review Checklist:** [docs/documentation-review-checklist.md](docs/documentation-review-checklist.md) defines the automation-enforced review gate for SRD, roadmap, and changelog updates.
 
-> SRD last updated: 2025-05-28
+> SRD last updated: 2025-05-30
+> Roadmap last updated: 2025-05-30
 
 <img src="./assets/m2_performance.jpg" alt="m2_performance" width="800"/>
 <img src="./assets/intel_performance.jpg" alt="m2_performance" width="800"/>
