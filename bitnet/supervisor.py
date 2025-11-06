@@ -22,10 +22,13 @@ import contextlib
 import heapq
 import itertools
 import json
+import logging
 import time
 import uuid
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
+from enum import Enum
+from pathlib import Path
 from typing import (
     Any,
     AsyncIterator,
@@ -41,6 +44,13 @@ from typing import (
     Union,
 )
 
+try:  # pragma: no cover - optional dependency
+    from opentelemetry import trace as _otel_trace  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    _otel_trace = None
+
+_DEFAULT_TRACER = _otel_trace.get_tracer(__name__) if _otel_trace is not None else None
+
 from .runtime import (
     BitNetRuntime,
     RuntimeLaunchError,
@@ -51,6 +61,7 @@ __all__ = [
     "RuntimeSupervisor",
     "RuntimeResult",
     "StreamEvent",
+    "SchedulingPolicy",
     "GRPCSupervisorDriver",
     "RaySupervisorDriver",
     "CelerySupervisorDriver",
@@ -105,6 +116,8 @@ class ScheduledTask:
     metadata: Mapping[str, Any]
     stream_queue: Optional["asyncio.Queue[StreamEvent]"] = None
     future: Optional["asyncio.Future[RuntimeResult]"] = None
+    resources: Mapping[str, int] = field(default_factory=dict)
+    reserved_resources: MutableMapping[str, int] = field(default_factory=dict)
 
 
 class CircuitBreaker:
@@ -142,6 +155,14 @@ class CircuitBreaker:
 
 
 
+class SchedulingPolicy(str, Enum):
+    """Supported scheduling policy identifiers."""
+
+    WEIGHTED_FAIR = "weighted-fair"
+    PRIORITY = "priority"
+    RESOURCE_AWARE = "resource-aware"
+
+
 class RuntimeSupervisor:
     """Async orchestrator for launching llama.cpp binaries.
 
@@ -169,6 +190,15 @@ class RuntimeSupervisor:
     default_retry:
         Number of retry attempts applied when a task does not override the
         retry policy.
+    scheduling_policy:
+        Selects how queued tasks are prioritised.  ``"weighted-fair"`` (the
+        default) balances work across backends, ``"priority"`` honours numeric
+        priorities strictly, and ``"resource-aware"`` incorporates resource
+        reservations when ordering the queue.
+    resource_limits:
+        Optional mapping of resource names (e.g. ``{"gpu": 2}``) used by the
+        resource-aware scheduler to gate task dispatch.  Tasks may specify
+        resource requirements that must be available before execution.
     """
 
     def __init__(
@@ -182,11 +212,15 @@ class RuntimeSupervisor:
         backend_weights: Optional[Mapping[str, int]] = None,
         default_retry: int = 0,
         default_retry_backoff: float = 0.5,
+        scheduling_policy: Union[SchedulingPolicy, str] = SchedulingPolicy.WEIGHTED_FAIR,
+        resource_limits: Optional[Mapping[str, int]] = None,
+        tracer: Optional[Any] = None,
     ) -> None:
         if concurrency is not None and concurrency <= 0:
             raise ValueError("concurrency must be a positive integer when provided")
 
         self._runtime = runtime
+        self._logger = logging.getLogger("bitnet.supervisor")
         limit = concurrency or max(1, runtime.cpu_count)
         self._global_limit = limit
         self._semaphore = asyncio.Semaphore(limit)
@@ -198,12 +232,23 @@ class RuntimeSupervisor:
         self._default_retry = max(0, default_retry)
         self._default_retry_backoff = max(0.0, default_retry_backoff)
 
+        if isinstance(scheduling_policy, SchedulingPolicy):
+            self._scheduling_policy = scheduling_policy
+        else:
+            try:
+                self._scheduling_policy = SchedulingPolicy(scheduling_policy)
+            except ValueError as exc:  # pragma: no cover - validation
+                raise ValueError(f"Unknown scheduling policy: {scheduling_policy}") from exc
+
         self._backend_limits = dict(backend_limits or {})
         self._backend_weights = {k: max(1, v) for k, v in (backend_weights or {}).items()}
         self._bulkheads: Dict[str, asyncio.Semaphore] = {}
         self._circuit_breakers: Dict[str, CircuitBreaker] = {}
+        self._resource_limits = {k: max(0, int(v)) for k, v in (resource_limits or {}).items()}
+        self._resource_available: Dict[str, int] = dict(self._resource_limits)
+        self._resource_lock = asyncio.Lock()
 
-        self._task_queue: List[Tuple[Tuple[int, float, int], ScheduledTask]] = []
+        self._task_queue: List[Tuple[Tuple[Any, ...], ScheduledTask]] = []
         self._counter = itertools.count()
         self._backend_finish: Dict[str, float] = {}
         self._closed = False
@@ -216,6 +261,7 @@ class RuntimeSupervisor:
         self._shutdown_callbacks: List[Callable[[], Awaitable[None]]] = []
 
         self._default_backend = "default"
+        self._tracer = tracer if tracer is not None else _DEFAULT_TRACER
 
     # ------------------------------------------------------------------
     # Lifecycle management
@@ -297,6 +343,7 @@ class RuntimeSupervisor:
         retry_backoff: Optional[float] = None,
         fallback: Optional[Union[Sequence[str], Callable[[], Awaitable[RuntimeResult]]]] = None,
         metadata: Optional[Mapping[str, Any]] = None,
+        resources: Optional[Mapping[str, int]] = None,
         **kwargs: Any,
     ) -> RuntimeResult:
         params = dict(kwargs)
@@ -312,6 +359,7 @@ class RuntimeSupervisor:
             retry_backoff=retry_backoff,
             fallback=fallback,
             metadata=metadata or {},
+            resources=resources or {},
         )
 
     async def run_server(
@@ -325,6 +373,7 @@ class RuntimeSupervisor:
         retry_backoff: Optional[float] = None,
         fallback: Optional[Union[Sequence[str], Callable[[], Awaitable[RuntimeResult]]]] = None,
         metadata: Optional[Mapping[str, Any]] = None,
+        resources: Optional[Mapping[str, int]] = None,
         **kwargs: Any,
     ) -> RuntimeResult:
         params = dict(kwargs)
@@ -340,6 +389,7 @@ class RuntimeSupervisor:
             retry_backoff=retry_backoff,
             fallback=fallback,
             metadata=metadata or {},
+            resources=resources or {},
         )
 
     async def run_custom(
@@ -354,6 +404,7 @@ class RuntimeSupervisor:
         retry_backoff: Optional[float] = None,
         fallback: Optional[Union[Sequence[str], Callable[[], Awaitable[RuntimeResult]]]] = None,
         metadata: Optional[Mapping[str, Any]] = None,
+        resources: Optional[Mapping[str, int]] = None,
     ) -> RuntimeResult:
         """Execute a fully specified command under supervision."""
 
@@ -367,6 +418,7 @@ class RuntimeSupervisor:
             retry_backoff=retry_backoff,
             fallback=fallback,
             metadata=metadata or {},
+            resources=resources or {},
         )
 
     async def stream_run_custom(
@@ -381,6 +433,7 @@ class RuntimeSupervisor:
         retry_backoff: Optional[float] = None,
         fallback: Optional[Union[Sequence[str], Callable[[], Awaitable[RuntimeResult]]]] = None,
         metadata: Optional[Mapping[str, Any]] = None,
+        resources: Optional[Mapping[str, int]] = None,
     ) -> AsyncIterator[StreamEvent]:
         """Execute a command and yield :class:`StreamEvent` updates."""
 
@@ -406,6 +459,7 @@ class RuntimeSupervisor:
                 fallback=fallback,
                 metadata=metadata or {},
                 stream_queue=queue,
+                resources=resources or {},
             )
         )
 
@@ -433,6 +487,7 @@ class RuntimeSupervisor:
         retry_backoff: Optional[float],
         fallback: Optional[Union[Sequence[str], Callable[[], Awaitable[RuntimeResult]]]],
         metadata: Mapping[str, Any],
+        resources: Mapping[str, int],
     ) -> RuntimeResult:
         if self._closed:
             raise RuntimeError("RuntimeSupervisor is closed and cannot schedule new work")
@@ -456,6 +511,7 @@ class RuntimeSupervisor:
             fallback=fallback,
             metadata=metadata,
             future=future,
+            resources=dict(resources),
         )
 
         await self._enqueue_task(scheduled)
@@ -465,13 +521,7 @@ class RuntimeSupervisor:
         if self._dispatcher is None:
             await self.start()
 
-        backend = task.backend
-        backend_weight = self._backend_weights.get(backend, 1)
-        effective_weight = max(1, backend_weight * task.weight)
-        start = max(self._backend_finish.get(backend, 0.0), 0.0)
-        finish = start + (1.0 / effective_weight)
-        self._backend_finish[backend] = finish
-        key = (task.priority, finish, next(self._counter))
+        key = self._schedule_key(task)
 
         heapq.heappush(self._task_queue, (key, task))
         self._queue_event.set()
@@ -480,6 +530,8 @@ class RuntimeSupervisor:
         try:
             while True:
                 await self._queue_event.wait()
+
+                deferred: List[Tuple[Tuple[Any, ...], ScheduledTask]] = []
 
                 while self._task_queue:
                     key, task = heapq.heappop(self._task_queue)
@@ -504,9 +556,20 @@ class RuntimeSupervisor:
                             )
                         continue
 
+                    reservation = await self._reserve_resources(task)
+                    if reservation is None:
+                        deferred.append((key, task))
+                        continue
+                    task.reserved_resources = reservation
+
                     asyncio.create_task(self._run_task(task))
 
+                for item in deferred:
+                    heapq.heappush(self._task_queue, item)
+
                 self._queue_event.clear()
+                if deferred:
+                    await asyncio.sleep(0.01)
         except asyncio.CancelledError:
             pass
 
@@ -522,6 +585,67 @@ class RuntimeSupervisor:
             self._circuit_breakers[backend] = CircuitBreaker()
         return self._circuit_breakers[backend]
 
+    def _schedule_key(self, task: ScheduledTask) -> Tuple[Any, ...]:
+        counter = next(self._counter)
+        if self._scheduling_policy is SchedulingPolicy.PRIORITY:
+            return (task.priority, counter)
+
+        backend = task.backend
+        backend_weight = self._backend_weights.get(backend, 1)
+        effective_weight = max(1, backend_weight * task.weight)
+        start = max(self._backend_finish.get(backend, 0.0), 0.0)
+        finish = start + (1.0 / effective_weight)
+        self._backend_finish[backend] = finish
+
+        if self._scheduling_policy is SchedulingPolicy.RESOURCE_AWARE:
+            pressure = self._resource_pressure(task.resources)
+            return (task.priority, pressure, finish, counter)
+
+        return (task.priority, finish, counter)
+
+    def _resource_pressure(self, resources: Mapping[str, int]) -> float:
+        if not resources:
+            return 0.0
+        pressure = 0.0
+        for name, amount in resources.items():
+            if amount <= 0:
+                continue
+            limit = self._resource_limits.get(name)
+            if limit:
+                pressure += amount / max(1, limit)
+            else:
+                pressure += 1.0
+        return pressure
+
+    async def _reserve_resources(self, task: ScheduledTask) -> Optional[Dict[str, int]]:
+        if not task.resources or not self._resource_limits:
+            return {}
+        request: Dict[str, int] = {k: max(0, int(v)) for k, v in task.resources.items()}
+        async with self._resource_lock:
+            for name, amount in request.items():
+                if amount <= 0:
+                    continue
+                limit = self._resource_limits.get(name)
+                if limit is None:
+                    continue
+                available = self._resource_available.get(name, limit)
+                if amount > available:
+                    return None
+            for name, amount in request.items():
+                limit = self._resource_limits.get(name)
+                if limit is None:
+                    continue
+                self._resource_available[name] = self._resource_available.get(name, limit) - amount
+            return {k: v for k, v in request.items() if self._resource_limits.get(k) is not None}
+
+    async def _release_resources(self, reserved: Mapping[str, int]) -> None:
+        if not reserved:
+            return
+        async with self._resource_lock:
+            for name, amount in reserved.items():
+                self._resource_available[name] = self._resource_available.get(name, 0) + int(amount)
+        self._queue_event.set()
+
     async def _run_task(self, task: ScheduledTask) -> None:
         backend = task.backend
         future = task.future
@@ -535,7 +659,18 @@ class RuntimeSupervisor:
                 self._active_tasks += 1
                 self._active_per_backend[backend] += 1
                 try:
-                    result = await self._execute_with_retry(task, breaker)
+                    span_cm = contextlib.nullcontext()
+                    if self._tracer is not None:
+                        span_cm = self._tracer.start_as_current_span(
+                            "bitnet.supervisor.execute",
+                            attributes={
+                                "bitnet.backend": backend,
+                                "bitnet.command": " ".join(task.command),
+                                "bitnet.priority": task.priority,
+                            },
+                        )
+                    with span_cm:
+                        result = await self._execute_with_retry(task, breaker)
                     if future and not future.done():
                         future.set_result(result)
                     if queue is not None:
@@ -550,6 +685,7 @@ class RuntimeSupervisor:
                             )
                         )
                 except Exception as exc:  # pragma: no cover - defensive
+                    self._logger.exception("Task execution failed")
                     if future and not future.done():
                         future.set_exception(exc)
                     if queue is not None:
@@ -567,6 +703,9 @@ class RuntimeSupervisor:
                     self._active_per_backend[backend] -= 1
                     if self._active_per_backend[backend] <= 0:
                         self._active_per_backend.pop(backend, None)
+                    await self._release_resources(dict(task.reserved_resources))
+                    if hasattr(task.reserved_resources, "clear"):
+                        task.reserved_resources.clear()
 
     async def _execute_with_retry(
         self, task: ScheduledTask, breaker: CircuitBreaker
@@ -757,6 +896,11 @@ class GRPCSupervisorDriver:
         *,
         host: str = "0.0.0.0",
         port: int = 50051,
+        use_local_credentials: bool = False,
+        tls_config: Optional[Mapping[str, Any]] = None,
+        auth_token: Optional[str] = None,
+        interceptors: Optional[Sequence[Any]] = None,
+        tracer: Optional[Any] = None,
     ) -> None:
         try:
             import grpc  # type: ignore
@@ -768,21 +912,49 @@ class GRPCSupervisorDriver:
         self._grpc_aio = grpc_aio
         self._supervisor = supervisor
         self._host = host
-        self._port = port
+        self._requested_port = int(port)
+        self._bound_port = int(port)
         self._server: Optional[Any] = None
+        self._server_credentials: Optional[Any] = None
+        self._client_credentials: Optional[Any] = None
+        self._use_local_credentials = use_local_credentials
+        self._tls_config = dict(tls_config or {})
+        self._auth_token = auth_token
+        self._interceptors = tuple(interceptors or ())
+        self._tracer = tracer if tracer is not None else _DEFAULT_TRACER
+        self._logger = logging.getLogger("bitnet.supervisor.grpc")
+
+        if self._tls_config:
+            self._server_credentials, self._client_credentials = self._build_tls_credentials(
+                self._tls_config
+            )
+        elif self._use_local_credentials:
+            self._server_credentials = self._grpc.local_server_credentials()
+            self._client_credentials = self._grpc.local_channel_credentials()
 
     @property
     def address(self) -> str:
-        return f"{self._host}:{self._port}"
+        port = self._bound_port if self._server is not None else self._requested_port
+        return f"{self._host}:{port}"
 
     async def start(self) -> None:
         if self._server is not None:
             return
 
         handler = self._build_handler()
-        self._server = self._grpc_aio.server()
+        server_kwargs: Dict[str, Any] = {}
+        if self._interceptors:
+            server_kwargs["interceptors"] = list(self._interceptors)
+        self._server = self._grpc_aio.server(**server_kwargs)
         self._server.add_generic_rpc_handlers((handler,))
-        self._server.add_insecure_port(self.address)
+        bind_target = f"{self._host}:{self._requested_port}"
+        if self._server_credentials is not None:
+            bound_port = self._server.add_secure_port(bind_target, self._server_credentials)
+        else:
+            bound_port = self._server.add_insecure_port(bind_target)
+        if bound_port == 0:
+            raise RuntimeError(f"Failed to bind gRPC server on {bind_target}")
+        self._bound_port = bound_port
         await self._server.start()
 
     async def shutdown(self) -> None:
@@ -806,23 +978,83 @@ class GRPCSupervisorDriver:
         if target is None:
             target = self.address
 
-        channel = self._grpc_aio.insecure_channel(target)
+        if self._client_credentials is not None:
+            channel = self._grpc_aio.secure_channel(target, self._client_credentials)
+        else:
+            channel = self._grpc_aio.insecure_channel(target)
         try:
             method = channel.unary_unary(self._SUBMIT_METHOD)
             payload = json.dumps({
                 "command": list(command),
                 "options": dict(options or {}),
             }).encode("utf-8")
-            response = await method(payload)
+            metadata = []
+            if self._auth_token:
+                metadata.append(("authorization", f"Bearer {self._auth_token}"))
+            span_cm = contextlib.nullcontext()
+            if self._tracer is not None:
+                host_part, _, port_part = target.rpartition(":")
+                try:
+                    peer_port = int(port_part) if port_part else 0
+                except ValueError:
+                    peer_port = 0
+                span_cm = self._tracer.start_as_current_span(
+                    "bitnet.supervisor.grpc.submit",
+                    attributes={
+                        "rpc.system": "grpc",
+                        "net.peer.name": host_part or target,
+                        "net.peer.port": peer_port,
+                    },
+                )
+            with span_cm:
+                response = await method(payload, metadata=metadata or None)
             data = json.loads(response.decode("utf-8"))
             return _result_from_payload(data)
+        except self._grpc.RpcError as exc:
+            raise RuntimeError(f"gRPC submission failed: {exc}") from exc
         finally:
             await channel.close()
+
+    def _load_bytes(self, value: Any) -> Optional[bytes]:
+        if value is None:
+            return None
+        if isinstance(value, (bytes, bytearray)):
+            return bytes(value)
+        path = Path(str(value))
+        if not path.exists():  # pragma: no cover - defensive
+            raise FileNotFoundError(path)
+        return path.read_bytes()
+
+    def _build_tls_credentials(self, config: Mapping[str, Any]) -> Tuple[Any, Any]:
+        cert_chain = self._load_bytes(config.get("server_cert") or config.get("certificate"))
+        private_key = self._load_bytes(config.get("server_key") or config.get("key"))
+        if not cert_chain or not private_key:
+            raise ValueError("TLS configuration requires server_cert and server_key")
+        client_cert = self._load_bytes(config.get("client_cert"))
+        client_key = self._load_bytes(config.get("client_key"))
+        root_cert = self._load_bytes(config.get("root_cert") or config.get("ca_cert"))
+        require_client_auth = bool(config.get("require_client_auth"))
+
+        server_credentials = self._grpc.ssl_server_credentials(
+            ((private_key, cert_chain),),
+            root_certificates=root_cert if require_client_auth else None,
+            require_client_auth=require_client_auth,
+        )
+        client_credentials = self._grpc.ssl_channel_credentials(
+            root_certificates=root_cert or cert_chain,
+            private_key=client_key,
+            certificate_chain=client_cert,
+        )
+        return server_credentials, client_credentials
 
     def _build_handler(self) -> "Any":
         grpc_aio = self._grpc_aio
         supervisor = self._supervisor
         submit_method = self._SUBMIT_METHOD
+        auth_token = self._auth_token
+        tracer = self._tracer
+        grpc_module = self._grpc
+        logger = self._logger
 
         handler_factory = getattr(grpc_aio, "unary_unary_rpc_method_handler", None)
         if handler_factory is None:
@@ -835,10 +1067,37 @@ class GRPCSupervisorDriver:
                 return None
 
             async def _submit(self, request: bytes, context: Any) -> bytes:
-                payload = json.loads(request.decode("utf-8"))
+                try:
+                    payload = json.loads(request.decode("utf-8"))
+                except json.JSONDecodeError:
+                    await context.abort(grpc_module.StatusCode.INVALID_ARGUMENT, "invalid JSON payload")
+
                 command = payload.get("command", [])
                 options = payload.get("options", {})
-                result = await supervisor.run_custom(command, **options)
+                metadata = {k.lower(): v for k, v in context.invocation_metadata()}
+                if auth_token is not None:
+                    if metadata.get("authorization") != f"Bearer {auth_token}":
+                        await context.abort(grpc_module.StatusCode.UNAUTHENTICATED, "invalid auth token")
+                if not isinstance(command, Sequence):
+                    await context.abort(grpc_module.StatusCode.INVALID_ARGUMENT, "command must be a sequence")
+                if not isinstance(options, Mapping):
+                    await context.abort(grpc_module.StatusCode.INVALID_ARGUMENT, "options must be a mapping")
+                span_cm = contextlib.nullcontext()
+                if tracer is not None:
+                    span_cm = tracer.start_as_current_span(
+                        "bitnet.supervisor.grpc.handle",
+                        attributes={
+                            "rpc.system": "grpc",
+                            "rpc.method": "Submit",
+                        },
+                    )
+                try:
+                    with span_cm:
+                        normalized_command = [str(part) for part in command]
+                        result = await supervisor.run_custom(normalized_command, **dict(options))
+                except Exception as exc:
+                    logger.exception("gRPC command execution failed")
+                    await context.abort(grpc_module.StatusCode.INTERNAL, str(exc))
                 return json.dumps(asdict(result)).encode("utf-8")
 
         return _Handler()
@@ -854,6 +1113,11 @@ class RaySupervisorDriver:
         supervisor_options: Optional[Mapping[str, Any]] = None,
         num_workers: int = 1,
         shutdown_ray: bool = False,
+        address: Optional[str] = None,
+        namespace: Optional[str] = None,
+        runtime_env: Optional[Mapping[str, Any]] = None,
+        tracer: Optional[Any] = None,
+        init_kwargs: Optional[Mapping[str, Any]] = None,
     ) -> None:
         try:
             import ray  # type: ignore
@@ -862,11 +1126,21 @@ class RaySupervisorDriver:
 
         self._ray = ray
         self._shutdown_ray = shutdown_ray
+        init_options: Dict[str, Any] = {"ignore_reinit_error": True}
+        if address is not None:
+            init_options["address"] = address
+        if namespace is not None:
+            init_options["namespace"] = namespace
+        if runtime_env is not None:
+            init_options["runtime_env"] = dict(runtime_env)
+        if init_kwargs is not None:
+            init_options.update(dict(init_kwargs))
         if not self._ray.is_initialized():  # pragma: no cover - environment dependent
-            self._ray.init(ignore_reinit_error=True)
+            self._ray.init(**init_options)
 
         options = dict(supervisor_options or {})
         runtime_factory_fn = runtime_factory
+        use_tracing = tracer is not None
 
         ray = self._ray
 
@@ -875,12 +1149,20 @@ class RaySupervisorDriver:
             def __init__(self) -> None:
                 self._runtime = runtime_factory_fn()
                 self._supervisor = RuntimeSupervisor(self._runtime, **options)
+                self._tracer = _DEFAULT_TRACER if use_tracing else None
 
             async def start(self) -> None:
                 await self._supervisor.start()
 
             async def submit(self, command: Sequence[str], opts: Mapping[str, Any]) -> Mapping[str, Any]:
-                result = await self._supervisor.run_custom(command, **dict(opts))
+                span_cm = contextlib.nullcontext()
+                if self._tracer is not None:
+                    span_cm = self._tracer.start_as_current_span(
+                        "bitnet.supervisor.ray.execute",
+                        attributes={"rpc.system": "ray"},
+                    )
+                with span_cm:
+                    result = await self._supervisor.run_custom(command, **dict(opts))
                 return asdict(result)
 
             async def shutdown(self) -> None:
@@ -889,11 +1171,24 @@ class RaySupervisorDriver:
         self._workers = [_Worker.remote() for _ in range(max(1, num_workers))]
         self._ray.get([w.start.remote() for w in self._workers])
         self._worker_cycle = itertools.cycle(self._workers)
+        self._tracer = tracer if tracer is not None else _DEFAULT_TRACER
+        self._logger = logging.getLogger("bitnet.supervisor.ray")
 
     async def submit_task(self, command: Sequence[str], **options: Any) -> RuntimeResult:
         worker = next(self._worker_cycle)
-        ref = worker.submit.remote(list(command), options)
-        payload = await asyncio.to_thread(self._ray.get, ref)
+        span_cm = contextlib.nullcontext()
+        if self._tracer is not None:
+            span_cm = self._tracer.start_as_current_span(
+                "bitnet.supervisor.ray.submit",
+                attributes={"rpc.system": "ray"},
+            )
+        try:
+            with span_cm:
+                ref = worker.submit.remote(list(command), options)
+                payload = await asyncio.to_thread(self._ray.get, ref)
+        except self._ray.exceptions.RayError as exc:  # pragma: no cover - environment dependent
+            self._logger.exception("Ray task submission failed")
+            raise RuntimeError(f"Ray execution failed: {exc}") from exc
         return _result_from_payload(payload)
 
     async def shutdown(self) -> None:

@@ -11,6 +11,7 @@ clean hook point.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import math
 import os
@@ -20,7 +21,6 @@ import selectors
 import shutil
 import subprocess
 import time
-import contextlib
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -127,6 +127,38 @@ class BitNetRuntime:
             "executions.circuit_open": 0,
             "executions.duration_ms_total": 0.0,
         }
+        self._metric_metadata: Mapping[str, Mapping[str, str]] = MappingProxyType(
+            {
+                "executions.total": {
+                    "help": "Total number of BitNet runtime process launches",
+                    "type": "counter",
+                },
+                "executions.success": {
+                    "help": "Successful BitNet runtime process launches",
+                    "type": "counter",
+                },
+                "executions.failure": {
+                    "help": "Failed BitNet runtime process launches",
+                    "type": "counter",
+                },
+                "executions.retry": {
+                    "help": "Retries attempted after a failed process launch",
+                    "type": "counter",
+                },
+                "executions.timeout": {
+                    "help": "Process launches terminated due to timeout",
+                    "type": "counter",
+                },
+                "executions.circuit_open": {
+                    "help": "Circuit breaker blocks for process launches",
+                    "type": "counter",
+                },
+                "executions.duration_ms_total": {
+                    "help": "Aggregate runtime duration in milliseconds",
+                    "type": "counter",
+                },
+            }
+        )
         self._max_retries = max(0, int(max_retries))
         self._retry_backoff_base = max(0.0, float(retry_backoff_base))
         self._retry_backoff_cap = max(self._retry_backoff_base, float(retry_backoff_cap))
@@ -176,6 +208,83 @@ class BitNetRuntime:
         """Return a read-only copy of the current runtime metrics."""
 
         return MappingProxyType(dict(self._metrics))
+
+    def prometheus_metrics(self, *, include_probes: bool = True) -> str:
+        """Render metrics and probe status in Prometheus exposition format."""
+
+        lines: List[str] = []
+        for name, value in sorted(self._metrics.items()):
+            meta = self._metric_metadata.get(name, {})
+            metric_name = f"bitnet_runtime_{name.replace('.', '_')}"
+            if "help" in meta:
+                lines.append(f"# HELP {metric_name} {meta['help']}")
+            metric_type = meta.get("type")
+            if metric_type:
+                lines.append(f"# TYPE {metric_name} {metric_type}")
+            lines.append(f"{metric_name} {value}")
+
+        if include_probes:
+            for probe in self._health_probes:
+                report = self._run_probe(probe)
+                metric_name = f"bitnet_runtime_probe_status".replace(".", "_")
+                labels = {
+                    "probe": report.name,
+                    "status": report.status,
+                }
+                label_str = ",".join(f'{key}="{value}"' for key, value in labels.items())
+                status_value = 1 if report.status == "ok" else 0
+                lines.append(
+                    f"{metric_name}{{{label_str}}} {status_value}"
+                )
+                for detail_key, detail_value in report.details.items():
+                    if isinstance(detail_value, (int, float)):
+                        detail_metric = f"bitnet_runtime_probe_{report.name}_{detail_key}".replace(
+                            ".",
+                            "_",
+                        )
+                        lines.append(f"{detail_metric} {detail_value}")
+        return "\n".join(lines) + "\n"
+
+    def opentelemetry_metrics(self, *, include_probes: bool = True) -> List[Mapping[str, object]]:
+        """Return metrics formatted for OTLP exporters."""
+
+        metrics: List[Mapping[str, object]] = []
+        timestamp = time.time()
+        for name, value in self._metrics.items():
+            metrics.append(
+                {
+                    "name": f"bitnet.runtime.{name}",
+                    "value": float(value),
+                    "timestamp": timestamp,
+                    "attributes": {},
+                }
+            )
+
+        if include_probes:
+            for probe in self._health_probes:
+                report = self._run_probe(probe)
+                metrics.append(
+                    {
+                        "name": f"bitnet.runtime.probe.status",
+                        "value": 1 if report.status == "ok" else 0,
+                        "timestamp": timestamp,
+                        "attributes": {
+                            "probe": report.name,
+                            "status": report.status,
+                        },
+                    }
+                )
+                for detail_key, detail_value in report.details.items():
+                    if isinstance(detail_value, (int, float)):
+                        metrics.append(
+                            {
+                                "name": f"bitnet.runtime.probe.{report.name}.{detail_key}",
+                                "value": float(detail_value),
+                                "timestamp": timestamp,
+                                "attributes": {},
+                            }
+                        )
+        return metrics
 
     def recent_events(self, limit: Optional[int] = None) -> Sequence[TelemetryEvent]:
         """Return the most recent telemetry events."""
@@ -484,6 +593,9 @@ class BitNetRuntime:
             _DiskHealthProbe(),
             _MemoryHealthProbe(),
             _GpuHealthProbe(),
+            _GpuMemoryPressureProbe(),
+            _NumaHealthProbe(),
+            _SandboxingProbe(),
         )
 
     def _run_probe(self, probe: HealthProbe, *, refresh: bool = False) -> ProbeReport:
@@ -788,7 +900,7 @@ class _GpuHealthProbe:
     def __call__(self, runtime: BitNetRuntime) -> ProbeReport:  # noqa: ARG002 - runtime reserved
         command = [
             "nvidia-smi",
-            "--query-gpu=name,memory.total",
+            "--query-gpu=name,memory.total,memory.used",
             "--format=csv,noheader",
         ]
         try:
@@ -829,15 +941,77 @@ class _GpuHealthProbe:
         for index, line in enumerate(lines):
             parts = [segment.strip() for segment in line.split(",")]
             name = parts[0] if parts else f"GPU-{index}"
-            memory_gb: Optional[float] = None
+            memory_total_gb: Optional[float] = None
+            memory_used_gb: Optional[float] = None
             if len(parts) > 1:
-                memory_gb = _parse_memory(parts[1])
-            devices.append({"name": name, "memory_gb": memory_gb})
-        status = "ok" if devices else "absent"
+                memory_total_gb = _parse_memory(parts[1])
+            if len(parts) > 2:
+                memory_used_gb = _parse_memory(parts[2])
+            pressure: Optional[float] = None
+            if memory_total_gb and memory_used_gb is not None and memory_total_gb > 0:
+                pressure = memory_used_gb / memory_total_gb
+            devices.append(
+                {
+                    "name": name,
+                    "memory_total_gb": memory_total_gb,
+                    "memory_used_gb": memory_used_gb,
+                    "memory_pressure": pressure,
+                    "memory_gb": memory_total_gb,
+                }
+            )
+        pressures = [
+            float(device.get("memory_pressure"))
+            for device in devices
+            if isinstance(device.get("memory_pressure"), (int, float))
+        ]
+        worst_pressure = max(pressures) if pressures else 0.0
+        status = "ok"
+        if not devices:
+            status = "absent"
+        elif worst_pressure >= 0.95:
+            status = "critical"
+        elif worst_pressure >= 0.85:
+            status = "degraded"
         return ProbeReport(
             name=self.name,
             status=status,
-            details={"count": len(devices), "devices": devices},
+            details={"count": len(devices), "devices": devices, "max_memory_pressure": worst_pressure},
+        )
+
+
+@dataclass
+class _GpuMemoryPressureProbe:
+    name: str = "gpu_memory_pressure"
+
+    def __call__(self, runtime: BitNetRuntime) -> ProbeReport:  # noqa: ARG002
+        snapshot = runtime._gpu_snapshot()  # type: ignore[attr-defined]
+        devices = [
+            device
+            for device in snapshot.get("devices", [])
+            if isinstance(device, Mapping)
+        ]
+        if not devices:
+            return ProbeReport(
+                name=self.name,
+                status="absent",
+                details={"count": 0},
+            )
+        pressures: List[float] = []
+        for device in devices:
+            used = device.get("memory_used_gb")
+            total = device.get("memory_total_gb") or device.get("memory_gb")
+            if isinstance(used, (int, float)) and isinstance(total, (int, float)) and total > 0:
+                pressures.append(float(used) / float(total))
+        worst = max(pressures) if pressures else 0.0
+        status = "ok"
+        if worst >= 0.95:
+            status = "critical"
+        elif worst >= 0.85:
+            status = "degraded"
+        return ProbeReport(
+            name=self.name,
+            status=status,
+            details={"worst_pressure": worst, "sampled": len(pressures)},
         )
 
 
@@ -921,6 +1095,87 @@ def _env_visible_gpus() -> List[Mapping[str, object]]:
         if token:
             devices.append({"name": f"GPU-{token}", "index": index})
     return devices
+
+
+def _numa_topology() -> Mapping[str, object]:
+    base = Path("/sys/devices/system/node")
+    nodes: List[Mapping[str, object]] = []
+    if base.exists():
+        for node_dir in sorted(base.glob("node[0-9]*")):
+            cpulist_file = node_dir / "cpulist"
+            cpus = cpulist_file.read_text().strip() if cpulist_file.exists() else ""
+            meminfo_file = node_dir / "meminfo"
+            mem_total_kb = None
+            if meminfo_file.exists():
+                for line in meminfo_file.read_text().splitlines():
+                    if line.lower().startswith("memtotal"):
+                        parts = line.split()
+                        if len(parts) >= 2:
+                            with contextlib.suppress(ValueError):
+                                mem_total_kb = int(parts[1])
+                        break
+            nodes.append({"name": node_dir.name, "cpus": cpus, "memtotal_kb": mem_total_kb})
+    if not nodes:
+        try:
+            import psutil  # type: ignore
+
+            cpu_affinity = psutil.Process().cpu_affinity()  # type: ignore[attr-defined]
+            if cpu_affinity:
+                nodes.append({"name": "psutil", "cpus": ",".join(str(c) for c in cpu_affinity)})
+        except Exception:
+            pass
+    return {"count": len(nodes), "nodes": nodes}
+
+
+@dataclass
+class _NumaHealthProbe:
+    name: str = "numa"
+
+    def __call__(self, runtime: BitNetRuntime) -> ProbeReport:  # noqa: ARG002
+        topology = _numa_topology()
+        count = topology.get("count", 0)
+        status = "ok" if count else "unknown"
+        return ProbeReport(
+            name=self.name,
+            status=status,
+            details=topology,
+        )
+
+
+def _sandbox_status() -> Mapping[str, object]:
+    status: Dict[str, object] = {}
+    proc_status = Path("/proc/self/status")
+    if proc_status.exists():
+        content = proc_status.read_text().splitlines()
+        for line in content:
+            if line.startswith("Seccomp:"):
+                with contextlib.suppress(ValueError):
+                    status["seccomp_mode"] = int(line.split()[1])
+            if line.startswith("NoNewPrivs:"):
+                with contextlib.suppress(ValueError):
+                    status["no_new_privs"] = int(line.split()[1])
+    try:
+        status["uid"] = os.getuid()
+    except AttributeError:
+        status["uid"] = None
+    status.setdefault("seccomp_mode", 0)
+    status.setdefault("no_new_privs", 0)
+    status["sandboxed"] = bool(status.get("seccomp_mode")) or bool(status.get("no_new_privs"))
+    return status
+
+
+@dataclass
+class _SandboxingProbe:
+    name: str = "sandbox"
+
+    def __call__(self, runtime: BitNetRuntime) -> ProbeReport:  # noqa: ARG002
+        details = _sandbox_status()
+        status = "ok" if details.get("sandboxed") else "unknown"
+        return ProbeReport(
+            name=self.name,
+            status=status,
+            details=details,
+        )
 @dataclass(frozen=True)
 class TelemetryEvent:
     """Structured telemetry payload emitted by :class:`BitNetRuntime`."""

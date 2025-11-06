@@ -101,6 +101,8 @@ class BitNetRuntimeTests(unittest.TestCase):
         self.assertIn("probes", info)
         self.assertIn("disk", info["probes"])
         self.assertIn("memory", info["probes"])
+        self.assertIn("gpu", info["probes"])
+        self.assertIn("sandbox", info["probes"])
 
     def test_missing_binaries_raise_informative_error(self):
         runtime = BitNetRuntime(build_dir=self.build_dir / "missing")
@@ -177,6 +179,18 @@ class BitNetRuntimeTests(unittest.TestCase):
         self.assertIn("circuit", str(ctx.exception).lower())
         metrics = runtime.metrics_snapshot()
         self.assertGreaterEqual(metrics["executions.circuit_open"], 1)
+
+    def test_prometheus_metrics_include_probe_status(self):
+        runtime = BitNetRuntime(build_dir=self.build_dir)
+        metrics = runtime.prometheus_metrics()
+        self.assertIn("bitnet_runtime_executions_total", metrics)
+        self.assertIn("bitnet_runtime_probe_status", metrics)
+
+    def test_opentelemetry_metrics_exports_values(self):
+        runtime = BitNetRuntime(build_dir=self.build_dir)
+        events = runtime.opentelemetry_metrics()
+        names = {entry["name"] for entry in events}
+        self.assertIn("bitnet.runtime.executions.total", names)
 
 
 if __name__ == "__main__":

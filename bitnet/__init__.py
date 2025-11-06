@@ -12,7 +12,14 @@ from .runtime import (
     RuntimeTimeoutError,
     TelemetryEvent,
 )
-from .supervisor import RuntimeResult, RuntimeSupervisor
+from .supervisor import (
+    RuntimeResult,
+    RuntimeSupervisor,
+    SchedulingPolicy,
+    GRPCSupervisorDriver,
+    RaySupervisorDriver,
+    CelerySupervisorDriver,
+)
 
 __all__ = [
     "BitNetRuntime",
@@ -23,6 +30,10 @@ __all__ = [
     "RuntimeLaunchError",
     "RuntimeResult",
     "RuntimeSupervisor",
+    "SchedulingPolicy",
+    "GRPCSupervisorDriver",
+    "RaySupervisorDriver",
+    "CelerySupervisorDriver",
     "RuntimeTimeoutError",
     "TelemetryEvent",
     "__version__",
