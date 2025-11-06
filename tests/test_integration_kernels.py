@@ -61,6 +61,7 @@ class MinimalIntegrationTests(unittest.TestCase):
         metrics = self._run_binary(binary)
         self.assertGreater(metrics.get("token_per_second", 0.0), 0.0)
         self.assertGreater(metrics.get("latency_ms", 0.0), 0.0)
+        self.assertLess(metrics.get("max_error", 1.0), 1e-6)
 
     def test_gpu_integration_model_executes_when_available(self):
         if shutil.which("nvcc") is None:
@@ -70,6 +71,7 @@ class MinimalIntegrationTests(unittest.TestCase):
         metrics = self._run_binary(binary)
         self.assertGreater(metrics.get("token_per_second", 0.0), 0.0)
         self.assertGreater(metrics.get("latency_ms", 0.0), 0.0)
+        self.assertLess(metrics.get("max_error", 1.0), 1e-4)
 
 
 if __name__ == "__main__":
