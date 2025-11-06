@@ -1,6 +1,6 @@
 # System Requirements Document (SRD)
 
-_Last updated: 2025-05-28_
+_Last updated: 2025-05-30_
 
 ## 1. Mission Statement
 bitnet.cpp delivers high-performance inference for 1-bit and ternary LLMs on CPU and GPU targets. The system provides command-line tooling, runtime orchestration, and kernel implementations that make it possible to execute BitNet models efficiently on commodity hardware while remaining backwards compatible with llama.cpp workflows.
@@ -76,13 +76,104 @@ The system interacts with the following artefacts:
 | `gpu/` | GPU kernels and build instructions. |
 
 ### 6.2 Data Flow
+
+```mermaid
+flowchart LR
+    Prompt{{"User request"}}
+    CLI["CLI entrypoints\n(run_inference*.py)"]
+    Runtime["BitNetRuntime\nargument validation"]
+    Plan{"Diagnostics?"}
+    Cmd["Construct llama.cpp command"]
+    Kernels["Compiled ggml/BitNet kernels"]
+    Execute["Subprocess execution\n(llama-cli/server)"]
+    Telemetry["Telemetry stream\nRuntimeDiagnostics"]
+    Supervisor["RuntimeSupervisor\nasync orchestrator"]
+
+    Prompt --> CLI --> Runtime --> Plan
+    Plan -- No --> Cmd --> Execute --> Kernels
+    Plan -- Yes --> Runtime
+    Execute --> Telemetry --> Supervisor
+    Supervisor -->|Schedules runs| Runtime
+```
+
 1. User invokes CLI (`run_inference.py` or `run_inference_server.py`).
 2. Parser validates arguments and instantiates `BitNetRuntime`.
-3. Runtime constructs llama.cpp-compatible command line and optionally performs diagnostics.
-4. On execution, subprocess launches compiled binaries; telemetry updates `last_execution_timestamp`.
-5. Optional `RuntimeSupervisor` schedules multiple runs with concurrency limits and aggregates telemetry.
+3. Runtime branches into diagnostics or execution path while constructing a llama.cpp-compatible command line.
+4. Subprocess launches compiled binaries through the configured kernel backend; telemetry hooks publish structured events.
+5. Optional `RuntimeSupervisor` schedules multiple runs with concurrency limits and aggregates telemetry for downstream dashboards.
 
-### 6.3 Deployment Topologies
+### 6.3 Threading Model
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Runtime as BitNetRuntime
+    participant Supervisor as RuntimeSupervisor
+    participant Kernel as ggml-bitnet Kernels
+
+    User->>Runtime: launch_inference(request)
+    Runtime->>Runtime: Detect hardware threads
+    alt Managed by supervisor
+        Runtime->>Supervisor: register_task(config)
+        Supervisor->>Supervisor: throttle via semaphore
+        Supervisor->>Runtime: dispatch()
+    else Direct invocation
+        Runtime->>Runtime: clamp threads to bounds
+    end
+    Runtime->>Kernel: spawn worker threads
+    Kernel-->>Runtime: token stream callbacks
+    Runtime-->>User: inference result + metrics
+```
+
+Thread affinity is resolved at runtime: auto-detected cores are clamped by supervisor ceilings when orchestration is active. Kernel workers propagate backpressure via the telemetry stream if starvation is detected, ensuring the CLI surfaces actionable hints.
+
+### 6.4 Kernel Math Pipeline
+
+```mermaid
+graph TD
+    A[Quantised weights\n(ternary + LUT)] --> B[Dequant lookup\n(ggml-bitnet-lut.cpp)]
+    B --> C[Mixed-precision matmul\n(ggml-bitnet-mma.cpp)]
+    C --> D[Activation fusion\n(gelu/relu toggles)]
+    D --> E[Residual accumulation]
+    E --> F[Output token logits]
+
+    subgraph CPU/GPU parity
+        B
+        C
+    end
+```
+
+CPU and GPU kernels share lookup primitives, enabling release engineering to validate parity through shared regression suites. Instrumentation around `ggml-bitnet-mma.cpp` exports FLOP density and cache hit hints for observability consumers.
+
+### 6.5 Orchestration Topology
+
+```mermaid
+flowchart TB
+    subgraph Control Plane
+        CLIProxy[CLI wrapper / API]
+        Queue[Task queue]
+        Supv[RuntimeSupervisor workers]
+    end
+    subgraph Execution Plane
+        HostA[CPU host]
+        HostB[GPU host]
+    end
+    subgraph Telemetry Plane
+        Stream[Structured telemetry\n(JSONL, OTLP)]
+        Dashboards[Dashboards\n(TUI/Web)]
+    end
+
+    CLIProxy --> Queue --> Supv
+    Supv --> HostA
+    Supv --> HostB
+    HostA --> Stream
+    HostB --> Stream
+    Stream --> Dashboards
+```
+
+Supervisors run alongside queue consumers, feeding execution hosts that subscribe to shared telemetry. Optional dashboards, described in `docs/telemetry-dashboards.md`, subscribe to the same stream for real-time visibility.
+
+### 6.6 Deployment Topologies
 - **Local CPU**: Build via `setup_env.py --cpu` or manual CMake invocation; run CLI with GGUF model.
 - **Local GPU**: Follow `gpu/README.md` instructions to compile CUDA/ROCm kernels and run CLI with `--gpu-layers`.
 - **Service Integration**: Embed `BitNetRuntime` in orchestration services, using diagnostics and dry-run for health checks.
@@ -91,16 +182,25 @@ The system interacts with the following artefacts:
 - **Edge Devices**: Use `setup_env.py` with caching enabled to provision native
   binaries and GGUF artefacts without container runtimes.
 
-## 7. Module Interfaces
-- `BitNetRuntime.run_inference(...) -> Sequence[str] | int`: constructs or executes command.
-- `BitNetRuntime.run_server(...) -> Sequence[str] | int`: server launch.
-- `BitNetRuntime.diagnostics(...) -> RuntimeDiagnostics`: returns readiness summary.
-- `RuntimeSupervisor.schedule(...)`: schedule coroutine tasks (see dedicated doc).
+## 7. Module Reference Index
+
+| Module | Key entry points | Responsibilities | Telemetry hooks |
+| --- | --- | --- | --- |
+| `bitnet.runtime.BitNetRuntime` | `run_inference`, `run_server`, `diagnostics` | Validate configuration, render llama.cpp commands, enforce thread bounds. | Emits `RuntimeDiagnostics` payloads with core/memory insights. |
+| `bitnet.supervisor.RuntimeSupervisor` | `schedule`, `shutdown`, `active_tasks` | Async orchestration with concurrency gates, timeout enforcement, retry scaffolding. | Publishes scheduling events tagged with queue identifiers. |
+| `run_inference.py` | CLI `main` | Parse CLI args, invoke runtime helpers, print telemetry snapshots. | Streams JSONL events when `--telemetry-out` is set. |
+| `run_inference_server.py` | CLI `main` | Bootstrap llama.cpp HTTP server with guard rails (host binding, batch control). | Mirrors CLI telemetry schema for long-lived sessions. |
+| `setup_env.py` | `main`, `BootstrapPlan` | Resolve toolchains, orchestrate builds, prime caches for CPU/GPU targets. | Records provisioning steps and duration counters. |
+| `src/ggml-bitnet-*.cpp` | `ggml_bitnet_*` kernels | Implement ternary lookup tables, MMA pipelines, activation fusion across CPU/GPU. | Counters exported via `GGML_BITNET_TRACE` macros. |
+| `gpu/` | CUDA/ROCm kernels, build docs | Provide accelerator parity and packaging notes. | GPU telemetry forwarded through runtime stream metadata. |
+
+The module catalogue aligns with the documentation review checklist to ensure every release tracks functional ownership.
 
 ## 8. Configuration & Environment
 - `setup_env.py` accepts flags to select CPU/GPU toolchains and optional clean builds.
 - Environment variables inherited from host; advanced users may customise `PATH`, `LLAMA_*` settings through `BitNetRuntime`.
 - Models stored relative to invocation path; diagnostics confirm presence if path supplied.
+- Telemetry exporters are configured through the dashboard profiles defined in `docs/telemetry-dashboards.md`.
 
 ## 9. Roadmap Snapshot
 Refer to `docs/system-roadmap.md` for the living roadmap and milestone tracking, including modernization, GPU parity, observability, and automation goals.
@@ -120,3 +220,5 @@ Refer to `docs/system-roadmap.md` for the living roadmap and milestone tracking,
 - BitNet model release: <https://huggingface.co/microsoft/BitNet-b1.58-2B-4T>
 - Runtime supervisor guide: `docs/runtime_supervisor.md`
 - Deployment guide: `docs/deployment.md`
+- Telemetry dashboards: `docs/telemetry-dashboards.md`
+- Documentation checklist: `docs/documentation-review-checklist.md`

@@ -70,7 +70,55 @@ binaries and GGUF artefacts available in CI.
 - Extend reproducible infrastructure definitions to cover GPU node pools and
   service meshes.
 
-## 6. Turnkey deployments
+## 6. Automation and Release Alignment
+
+The CI workflow defined in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
+promotes build artefacts in a staircase pattern so that downstream deployment
+stays reproducible:
+
+1. **Lint gate (`lint`)** installs Python tooling, runs `ruff`, and validates
+   bytecode compilation to catch packaging regressions early.
+2. **Unit and integration tests (`python-tests`)** execute `pytest` with the
+   same dependency set as local development to confirm runtime behaviours.
+3. **Native build (`build-native`)** configures and compiles the llama.cpp
+   derivatives, uploading the resulting tarball for release packaging.
+4. **Python wheel (`python-wheel`)** builds the distribution artefact used by
+   CLI wrappers and dashboards.
+5. **Container images (`container-images`)** produce reproducible `bitnet-runtime`
+   and `bitnet-edge` images that can be promoted to registries.
+6. **Docs synchronisation (`docs-sync`)** executes `python tools/check_docs_sync.py`
+   to verify timestamps, SRD component coverage, the roadmap log, and the
+   documentation checklist.
+7. **Terraform validation (`terraform`)** ensures infrastructure definitions
+   remain deployable.
+
+### 6.1 Release promotion steps
+
+1. Trigger a tagged build (`git tag vX.Y.Z && git push origin vX.Y.Z`) once the
+   CI pipeline turns green.
+2. Download the `bitnet-binaries` and `bitnet-wheel` artefacts from the run and
+   attach them to the GitHub Release draft.
+3. Publish container images by loading the `bitnet-runtime.tar` and
+   `bitnet-edge.tar` archives locally and pushing to the target registry using
+   `docker load` / `docker push`.
+4. Update `CHANGELOG.md` under the dated section with deployment highlights,
+   referencing any SRD or roadmap amendments.
+5. Announce the release in `docs/iteration-log.md`, linking to dashboard themes
+   and operational runbooks as appropriate.
+
+### 6.2 Operational runbooks
+
+| Scenario | First response | Escalation path | Telemetry hook |
+| --- | --- | --- | --- |
+| **Hotfix rollback** | Redeploy previous container artefact using the stored `bitnet-runtime.tar`. | Notify release manager, file incident log in `docs/iteration-log.md`. | Compare telemetry deltas in dashboards using the "Release" theme. |
+| **Model asset missing** | Run `python run_inference.py --dry-run --diagnostics` to confirm path resolution. | Loop in storage owner, restore object store permissions. | Observe `missing_artifact` events in telemetry stream. |
+| **Kubernetes pod crash** | Check `kubectl logs` and `kubectl describe` for readiness probe failures. | Page on-call for kernel/runtime subsystem, attach CI artefact references. | Inspect `RuntimeSupervisor` failure summaries in dashboards. |
+| **Edge device drift** | Re-run `setup_env.py` with `--clean` on affected device, verify bootstrap cache. | Engage fleet operations to reimage or resync environment. | Use TUI dashboard offline snapshot mode to compare checksums. |
+
+Operators should treat `docs/documentation-review-checklist.md` as the
+pre-flight gate before approving changes that impact the pipeline or runbooks.
+
+## 7. Turnkey deployments
 
 BitNet now ships repeatable deployment assets that reduce the amount of custom
 plumbing required to move from local experiments to managed infrastructure.  CI
