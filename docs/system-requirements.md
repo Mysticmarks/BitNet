@@ -1,15 +1,17 @@
 # System Requirements Document (SRD)
 
-_Last updated: 2025-05-30_
+_Last updated: 2026-01-22_
 
 ## 1. Mission Statement
-bitnet.cpp delivers high-performance inference for 1-bit and ternary LLMs on CPU and GPU targets. The system provides command-line tooling, runtime orchestration, and kernel implementations that make it possible to execute BitNet models efficiently on commodity hardware while remaining backwards compatible with llama.cpp workflows.
+bitnet.cpp delivers high-performance inference for 1-bit and ternary LLMs on CPU and GPU targets. The system provides command-line tooling, runtime orchestration, and kernel implementations that make it possible to execute BitNet models efficiently on commodity hardware while remaining backwards compatible with llama.cpp workflows. The roadmap extends the runtime toward full omnimodal workflows (text, image, audio, and video) with deterministic 4K UHD 30fps output pipelines for compatible models and clients.
 
 ### Success Criteria
 - End users can execute inference or start the HTTP server with a one-command setup on supported platforms.
 - Runtime diagnostics clearly surface missing binaries, configuration issues, or model assets.
 - Benchmarks demonstrate parity with documented speedups in the README and research papers.
 - Documentation, tooling, and scripts remain synchronized and reproducible across CPU and GPU pathways.
+- Omnimodal sessions can accept and emit text, image, audio, and video payloads with validated codecs and schema.
+- Video-capable clients can request 4K UHD (3840x2160) output at 30fps with deterministic timing budgets.
 
 ## 2. Stakeholders & Personas
 - **Model Engineers**: optimise kernels or add hardware backends.
@@ -29,6 +31,7 @@ The system interacts with the following artefacts:
 - **Configuration scripts** (`setup_env.py`, `utils/e2e_benchmark.py`).
 - **Container artefacts** generated from `infra/docker/*.Dockerfile` and IaC
   modules under `infra/terraform/`.
+- **Omnimodal media assets** (images, audio clips, video frames) ingested through validated codecs and pre-processing pipelines.
 
 ## 4. Functional Requirements
 ### 4.1 Inference Execution
@@ -55,6 +58,17 @@ The system interacts with the following artefacts:
 - Python unit tests validate CLI argument parsing, runtime configuration guards, and command assembly (`tests`).
 - Native kernels must build successfully through CMake targets defined in `CMakeLists.txt`.
 
+### 4.6 Omnimodal Input/Output
+- Accept structured omnimodal payloads (text, image, audio, video) via CLI, server, and supervisor integrations.
+- Normalize media inputs with deterministic preprocessing (resizing, sampling rates, frame extraction).
+- Support multimodal prompt templates that map modality tokens to model-specific adapters.
+- Provide capability negotiation so clients can query supported codecs and modalities.
+
+### 4.7 4K UHD 30fps Output
+- Enable video-capable inference paths that emit 4K UHD (3840x2160) at 30fps when model and hardware constraints are met.
+- Expose runtime controls for frame pacing, keyframe cadence, and output format selection.
+- Emit diagnostics that report achieved FPS, dropped frames, and memory bandwidth usage.
+
 ## 5. Non-Functional Requirements
 - **Performance**: Maintain or improve documented throughput multipliers on supported hardware.
 - **Reliability**: Runtime diagnostics must flag missing artefacts before launch; failures surface actionable errors.
@@ -62,6 +76,7 @@ The system interacts with the following artefacts:
 - **Observability**: Provide structured diagnostics (`RuntimeDiagnostics.as_dict`) suitable for telemetry export.
 - **Security**: Avoid executing unvalidated user input as shell commands; all subprocess launches use argument lists.
 - **Usability**: CLI defaults should work for typical prompts without additional flags.
+- **Omnimodal Performance**: 4K UHD 30fps output should sustain steady frame pacing on supported GPUs, with clear degradation reporting on unsupported hardware.
 
 ## 6. Architecture Overview
 ### 6.1 High-Level Components
