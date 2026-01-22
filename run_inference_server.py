@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import signal
 import sys
 from pathlib import Path
 from typing import Optional
 
-from bitnet import BitNetRuntime, RuntimeConfigurationError, RuntimeLaunchError
+from bitnet import (
+    BitNetRuntime,
+    RuntimeConfigurationError,
+    RuntimeLaunchError,
+    build_cli_telemetry_sink,
+)
 
 
 def _parse_threads(value: str) -> Optional[int]:
@@ -77,6 +83,11 @@ def _build_parser() -> argparse.ArgumentParser:
         nargs=argparse.REMAINDER,
         help="Additional llama.cpp flags appended verbatim",
     )
+    parser.add_argument(
+        "--telemetry-out",
+        type=Path,
+        help="Write JSONL telemetry events to the specified file path",
+    )
     return parser
 
 
@@ -85,12 +96,28 @@ def main(argv: Optional[list[str]] = None) -> int:
     args = parser.parse_args(argv)
 
     runtime = BitNetRuntime(build_dir=args.build_dir, log_level=getattr(logging, args.log_level))
+    telemetry_sink = None
+    if args.telemetry_out:
+        telemetry_sink = build_cli_telemetry_sink(
+            output_path=args.telemetry_out,
+            component="run_inference_server",
+            header={
+                "pid": os.getpid(),
+                "model": str(args.model),
+                "host": args.host,
+                "port": args.port,
+            },
+        )
+        runtime.add_telemetry_sink(telemetry_sink)
 
     if args.diagnostics:
         report = runtime.diagnostics(model=args.model)
         print("Runtime diagnostics:")
         for key, value in report.as_dict().items():
             print(f"  {key}: {value}")
+        if telemetry_sink is not None:
+            runtime.remove_telemetry_sink(telemetry_sink)
+            telemetry_sink.close()
         return 0
 
     try:
@@ -113,6 +140,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     except RuntimeLaunchError as exc:
         print(f"Runtime exited with an error: {exc}", file=sys.stderr)
         return 1
+    finally:
+        if telemetry_sink is not None:
+            runtime.remove_telemetry_sink(telemetry_sink)
+            telemetry_sink.close()
 
     if args.dry_run and isinstance(result, list):
         print("Dry run command:")

@@ -20,6 +20,7 @@ from .supervisor import (
     RaySupervisorDriver,
     CelerySupervisorDriver,
 )
+from .telemetry import TelemetryRecord, TelemetryWriter, build_cli_telemetry_sink
 
 __all__ = [
     "BitNetRuntime",
@@ -36,5 +37,8 @@ __all__ = [
     "CelerySupervisorDriver",
     "RuntimeTimeoutError",
     "TelemetryEvent",
+    "TelemetryRecord",
+    "TelemetryWriter",
+    "build_cli_telemetry_sink",
     "__version__",
 ]
