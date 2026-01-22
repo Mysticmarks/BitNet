@@ -19,8 +19,8 @@ The first release of bitnet.cpp is to support inference on CPUs. bitnet.cpp achi
 - **Telemetry Dashboards:** [docs/telemetry-dashboards.md](docs/telemetry-dashboards.md) captures real-time observability profiles for TUI and web experiences.
 - **Documentation Review Checklist:** [docs/documentation-review-checklist.md](docs/documentation-review-checklist.md) defines the automation-enforced review gate for SRD, roadmap, and changelog updates.
 
-> SRD last updated: 2025-05-30
-> Roadmap last updated: 2025-05-30
+> SRD last updated: 2026-01-22
+> Roadmap last updated: 2026-01-22
 
 <img src="./assets/m2_performance.jpg" alt="m2_performance" width="800"/>
 <img src="./assets/intel_performance.jpg" alt="m2_performance" width="800"/>
